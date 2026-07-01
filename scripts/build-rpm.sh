@@ -9,9 +9,6 @@
 #   -t, --tarball  <file>     Source tarball (required)
 #   -s, --spec     <file>     RPM spec file  (required)
 #   -o, --output   <dir>      Output directory (default: ./output)
-#   -p, --platform <list>     Comma-separated platform list
-#                             (default: linux/amd64,linux/arm64)
-#       --single-arch         Build for the host architecture only
 #       --macros   <string>   Extra rpmbuild --define strings
 #       --extra-rpms <rpms>   Space-separated list of local RPM file paths to
 #                             install before running dnf builddep. Useful for
@@ -26,12 +23,8 @@
 #   -h, --help                Show this help
 #
 # Examples:
-#   # Multi-arch (amd64 + arm64)
+#   # Basic build
 #   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec
-#
-#   # Single arch (host only)
-#   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec \
-#                  --single-arch
 #
 #   # Custom output directory and extra macros
 #   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec \
@@ -52,8 +45,6 @@ set -euo pipefail
 TARBALL=""
 SPEC_FILE=""
 OUTPUT_DIR="./output"
-PLATFORMS="linux/amd64,linux/arm64"
-SINGLE_ARCH=false
 RPM_MACROS=""
 EXTRA_RPMS=""
 EXTRA_REPO_DIR=""
@@ -68,15 +59,13 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -t|--tarball)     TARBALL="$2";     shift 2 ;;
-        -s|--spec)        SPEC_FILE="$2";   shift 2 ;;
-        -o|--output)      OUTPUT_DIR="$2";  shift 2 ;;
-        -p|--platform)    PLATFORMS="$2";   shift 2 ;;
-        --single-arch)    SINGLE_ARCH=true; shift   ;;
-        --macros)         RPM_MACROS="$2";  shift 2 ;;
-        --extra-rpms)     EXTRA_RPMS="$2";  shift 2 ;;
-        --extra-repo)     EXTRA_REPO_DIR="$2";  shift 2 ;;
-        --base-image)     BASE_IMAGE="$2";  shift 2 ;;
+        -t|--tarball)     TARBALL="$2";        shift 2 ;;
+        -s|--spec)        SPEC_FILE="$2";      shift 2 ;;
+        -o|--output)      OUTPUT_DIR="$2";     shift 2 ;;
+        --macros)         RPM_MACROS="$2";     shift 2 ;;
+        --extra-rpms)     EXTRA_RPMS="$2";     shift 2 ;;
+        --extra-repo)     EXTRA_REPO_DIR="$2"; shift 2 ;;
+        --base-image)     BASE_IMAGE="$2";     shift 2 ;;
         -h|--help)        usage ;;
         *) echo "ERROR: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -143,41 +132,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── Determine platform string ──────────────────────────────────────────────────
-if [[ "${SINGLE_ARCH}" == true ]]; then
-    ARCH="$(uname -m)"
-    case "${ARCH}" in
-        x86_64)  PLATFORMS="linux/amd64"  ;;
-        aarch64) PLATFORMS="linux/arm64"  ;;
-        *)       PLATFORMS="linux/${ARCH}" ;;
-    esac
-    echo "INFO: Single-arch mode – building for ${PLATFORMS}"
-fi
-
-# ── Detect docker / docker buildx ─────────────────────────────────────────────
-DOCKER_CMD="docker"
-
-# For multi-arch builds we need buildx
-PLATFORM_COUNT=$(echo "${PLATFORMS}" | tr ',' '\n' | wc -l)
-
-if [[ "${PLATFORM_COUNT}" -gt 1 ]]; then
-    # Ensure buildx is available
-    if ! ${DOCKER_CMD} buildx version &>/dev/null; then
-        echo "ERROR: docker buildx is required for multi-arch builds." >&2
-        echo "       Install it or use --single-arch to build for the host only." >&2
-        exit 1
-    fi
-    BUILD_CMD="${DOCKER_CMD} buildx build"
-    # Ensure a multi-arch capable builder is active
-    if ! ${DOCKER_CMD} buildx inspect --bootstrap &>/dev/null; then
-        echo "INFO: Creating a new buildx builder instance..."
-        ${DOCKER_CMD} buildx create --use --name rpm-builder
-    fi
-else
-    # Single platform – plain docker build is sufficient
-    BUILD_CMD="${DOCKER_CMD} build"
-fi
-
 # ── Run the build ──────────────────────────────────────────────────────────────
 echo ""
 echo "============================================================"
@@ -185,7 +139,6 @@ echo " RPM Builder"
 echo "============================================================"
 echo " Tarball   : ${TARBALL_REL}"
 echo " Spec file : ${SPEC_REL}"
-echo " Platforms : ${PLATFORMS}"
 echo " Output    : ${OUTPUT_ABS}"
 echo " Base image: ${BASE_IMAGE}"
 [[ -n "${RPM_MACROS}" ]] && echo " Macros    : ${RPM_MACROS}"
@@ -194,8 +147,7 @@ echo " Base image: ${BASE_IMAGE}"
 echo "============================================================"
 echo ""
 
-${BUILD_CMD} \
-    --platform "${PLATFORMS}" \
+docker build \
     --build-arg "TARBALL=${TARBALL_REL}" \
     --build-arg "SPEC_FILE=${SPEC_REL}" \
     --build-arg "BASE_IMAGE=${BASE_IMAGE}" \

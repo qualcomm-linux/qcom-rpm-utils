@@ -1,8 +1,5 @@
-# syntax=docker/dockerfile:1
 # Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
-# =============================================================================
-# Multi-Architecture RPM Builder
 # =============================================================================
 # Builds RPM and SRPM packages from a source tarball and a spec file.
 # Supported platforms: linux/amd64 (x86_64) and linux/arm64 (aarch64)
@@ -23,17 +20,7 @@
 #                    from this repo are available to dnf builddep and
 #                    EXTRA_RPMS installs. (optional)
 #
-# ── Single-arch build ────────────────────────────────────────────────────────
 #   docker build \
-#     --build-arg TARBALL=mypackage-1.0.tar.gz \
-#     --build-arg SPEC_FILE=mypackage.spec \
-#     --output type=local,dest=./output \
-#     --target artifacts \
-#     .
-#
-# ── Multi-arch build (requires docker buildx) ────────────────────────────────
-#   docker buildx build \
-#     --platform linux/amd64,linux/arm64 \
 #     --build-arg TARBALL=mypackage-1.0.tar.gz \
 #     --build-arg SPEC_FILE=mypackage.spec \
 #     --output type=local,dest=./output \

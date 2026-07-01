@@ -12,7 +12,7 @@
 #                context (required, e.g. mypackage-1.0.tar.gz)
 #   SPEC_FILE  - Filename/path of the RPM spec file relative to the build
 #                context (required, e.g. mypackage.spec)
-#   BASE_IMAGE - Base image to use (default: fedora:latest)
+#   BASE_IMAGE - Base image to use (default: quay.io/centos/centos:stream10)
 #   RPM_MACROS - Extra rpmbuild macro definitions, space-separated
 #                (optional, e.g. "--define 'debug_package %{nil}'")
 #   EXTRA_RPMS - Space-separated list of local RPM paths (relative to build
@@ -47,7 +47,7 @@
 #     └── mypackage-1.0-1.src.rpm
 # =============================================================================
 
-ARG BASE_IMAGE=fedora:latest
+ARG BASE_IMAGE=quay.io/centos/centos:stream10
 
 # ---------------------------------------------------------------------------
 # Builder stage
@@ -76,7 +76,7 @@ RUN dnf -y install dnf-plugins-core \
     && dnf -y install \
         https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm \
     && dnf -y update \
-    && dnf -y install \ 
+    && dnf -y install \
         rpm-build \
         rpmdevtools \
         gcc \

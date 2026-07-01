@@ -18,7 +18,7 @@
 #                             pre-built dependency RPMs not in any repository.
 #                             (e.g. "output/foo-1.0.rpm output/foo-devel-1.0.rpm")
 #       --base-image <image>  Override the builder base image
-#                             (default: fedora:latest)
+#                             (default: quay.io/centos/centos:stream10)
 #       --extra-repo <url>    URL of an existing dnf repository (e.g. Artifactory)
 #                             to register inside the build container. Packages
 #                             from this repo are available to satisfy
@@ -156,16 +156,8 @@ fi
 
 # ── Detect docker / docker buildx ─────────────────────────────────────────────
 DOCKER_CMD="docker"
-#if ! command -v docker &>/dev/null; then
-#    if command -v podman &>/dev/null; then
-#        DOCKER_CMD="podman"
-#        echo "INFO: docker not found, using podman"
-#    else
-#        echo "ERROR: Neither docker nor podman found in PATH." >&2; exit 1
-#    fi
-#fi
 
-# For multi-arch builds we need buildx (or podman's equivalent)
+# For multi-arch builds we need buildx
 PLATFORM_COUNT=$(echo "${PLATFORMS}" | tr ',' '\n' | wc -l)
 
 if [[ "${PLATFORM_COUNT}" -gt 1 ]]; then

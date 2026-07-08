@@ -1,0 +1,243 @@
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+name: "Upload RPMs to Artifactory"
+description: "Uploads built RPM/SRPM packages to a JFrog Artifactory repository."
+
+
+inputs:
+  server_url:
+    description: "Artifactory server URL"
+    required: false
+    default: "https://qartifactory.qualcomm.com/"
+
+  target_repo:
+    description: "Target YUM/RPM repo name (e.g. qualcomm-dnf-repo)"
+    required: false
+    default: "qualcomm-dnf-repo"
+
+  rpm_dir:
+    description: "Directory containing the built *.rpm / *.src.rpm files to upload"
+    required: false
+    default: "output"
+
+  target_subpath:
+    description: "Subpath under target_repo to upload RPMs into (e.g. the package name)."
+    required: false
+    default: ""
+
+  cache_uploads_manifest:
+    description: >
+      Optional path to a TAB-separated manifest of source tarballs to cache back:
+      each line is 'localpath<TAB>cache-relative-path'. Uploaded under
+      <target_repo>/sources/<cache-relative-path>. Produced by resolve-sources.sh
+      --emit-cache-uploads.
+    required: false
+    default: ""
+
+  provenance_info:
+    description: "Extra Artifactory properties as a JSON object (e.g. {\"commit\":\"...\",\"workflow\":\"...\"})"
+    required: false
+    default: "{}"
+
+  access_token:
+    description: "Artifactory access token (mutually exclusive with qsc_api_key)"
+    required: false
+
+  qsc_api_key:
+    description: "QSC API key - used to generate a temporary access token (mutually exclusive with access_token)"
+    required: false
+
+  access_token_data:
+    description: "Access token data for generating access token - used in conjunction with qsc_api_key"
+    required: false
+    default: "{\"softwareName\":\"LU.QCLINUX\",\"softwareType\":\"SoftwareImage\",\"releaseTag\":\"2.0\"}"
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Install dependencies if needed
+      shell: bash
+      run: |
+        set -euo pipefail
+        SUDO=sudo
+        if [ "$(id -u)" = 0 ]; then SUDO=""; fi
+
+        required=(jq curl)
+        missing=()
+        for pkg in "${required[@]}"; do
+          if ! command -v "$pkg" >/dev/null 2>&1; then
+            missing+=("$pkg")
+          fi
+        done
+
+        if ((${#missing[@]})); then
+          echo "Installing missing packages: ${missing[*]}"
+          if command -v dnf >/dev/null 2>&1; then
+            $SUDO dnf install -y "${missing[@]}"
+          elif command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            $SUDO apt-get update -y -qq
+            $SUDO apt-get install -y -qq --no-install-recommends "${missing[@]}"
+          else
+            echo "ERROR: no supported package manager (dnf/apt-get) to install: ${missing[*]}" >&2
+            exit 1
+          fi
+        else
+          echo "All prerequisites already installed."
+        fi
+
+    - name: Setup JFrog CLI
+      uses: jfrog/setup-jfrog-cli@v5
+      with:
+        version: 2.113.0
+
+    - name: Generate access token if qsc_api_key is provided, otherwise use provided access_token
+      id: gen_token
+      shell: bash
+      env:
+        ACCESS_TOKEN_URL: "https://api.qualcomm.com/softwarecenter/v1/chipSoftware/artifactory/tokens"
+        QSC_API_KEY: ${{ inputs.qsc_api_key }}
+        ACCESS_TOKEN: ${{ inputs.access_token }}
+        ACCESS_TOKEN_DATA: ${{ inputs.access_token_data }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$QSC_API_KEY" ] && [ -z "$ACCESS_TOKEN" ]; then
+          echo "ERROR: Neither qsc_api_key nor access_token provided."
+          exit 1
+        fi
+
+        if [ -n "$QSC_API_KEY" ] && [ -n "$ACCESS_TOKEN" ]; then
+          echo "ERROR: Both qsc_api_key and access_token were provided. These are not compatible."
+          exit 1
+        fi
+
+        if [ -n "$ACCESS_TOKEN" ]; then
+          echo "Using provided access_token..."
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Generating access token using qsc_api_key..."
+        response=$(curl -s \
+          -X POST "$ACCESS_TOKEN_URL" \
+          -H 'Content-Type: application/json' \
+          -H 'X-QCOM-TokenType: apikey' \
+          -H "Authorization: $QSC_API_KEY" \
+          -d "$ACCESS_TOKEN_DATA")
+
+        token=$(echo "$response" | jq -r '.token')
+        if [ -z "$token" ] || [ "$token" = "null" ]; then
+          echo "ERROR: Failed to generate access token from qsc_api_key."
+          echo "Response was: $response"
+          exit 1
+        fi
+
+        echo "access_token=$token" >> "$GITHUB_OUTPUT"
+        echo "Access token generated successfully."
+
+    - name: Configure JFrog server
+      shell: bash
+      env:
+        SERVER_ID: "artifactory-server"
+        SERVER_URL: ${{ inputs.server_url }}
+        ACCESS_TOKEN: ${{ steps.gen_token.outputs.access_token }}
+      run: |
+        set -euo pipefail
+        jf c remove "$SERVER_ID" --quiet 2>/dev/null || true
+        jf c add "$SERVER_ID" \
+          --url "$SERVER_URL" \
+          --access-token "$ACCESS_TOKEN" \
+          --interactive=false \
+          --overwrite
+        echo "JFrog CLI configured with server ID: $SERVER_ID"
+        echo "Server URL: $SERVER_URL"
+
+    - name: Upload RPMs with architecture detection
+      shell: bash
+      env:
+        SERVER_ID: "artifactory-server"
+        TARGET_REPO: ${{ inputs.target_repo }}
+        TARGET_SUBPATH: ${{ inputs.target_subpath }}
+        RPM_DIR: ${{ inputs.rpm_dir }}
+        PROVENANCE_INFO: ${{ inputs.provenance_info }}
+        MANIFEST: ${{ inputs.cache_uploads_manifest }}
+      run: |
+        set -euo pipefail
+
+        shopt -s nullglob
+        rpms=()
+        if [ -d "$RPM_DIR" ]; then
+          rpms=("$RPM_DIR"/*.rpm)
+        fi
+
+        if [ "${#rpms[@]}" -eq 0 ]; then
+          if [ -n "$MANIFEST" ]; then
+            echo "No RPMs in '$RPM_DIR'; skipping RPM upload (cache-back only)."
+            exit 0
+          fi
+          echo "ERROR: no *.rpm files found in '$RPM_DIR'" >&2
+          exit 1
+        fi
+
+        PROPS=""
+        for key in $(echo "$PROVENANCE_INFO" | jq -r 'keys[]'); do
+          val=$(echo "$PROVENANCE_INFO" | jq -r --arg k "$key" '.[$k]')
+          PROPS="${PROPS:+${PROPS};}${key}=${val}"
+        done
+
+        TARGET_DIR="$TARGET_REPO/"
+        if [ -n "$TARGET_SUBPATH" ]; then
+          TARGET_DIR="${TARGET_REPO}/${TARGET_SUBPATH}/"
+        fi
+        echo "Upload target: $TARGET_DIR"
+
+        for f in "${rpms[@]}"; do
+          base="$(basename "$f")"
+          arch="${base%.rpm}"; arch="${arch##*.}"
+          fileprops="${PROPS:+${PROPS};}rpm.arch=${arch}"
+
+          dest="$TARGET_DIR"
+          if [[ "$base" == *.src.rpm ]]; then
+            dest="${TARGET_DIR}src/"
+          fi
+
+          echo "Uploading $base (arch=${arch}) -> $dest"
+          jf rt upload \
+            --server-id="$SERVER_ID" \
+            --flat=true \
+            --target-props "${fileprops}" \
+            "$f" \
+            "$dest"
+        done
+
+    - name: Cache back source tarballs
+      if: ${{ inputs.cache_uploads_manifest != '' }}
+      shell: bash
+      env:
+        SERVER_ID: "artifactory-server"
+        TARGET_REPO: ${{ inputs.target_repo }}
+        MANIFEST: ${{ inputs.cache_uploads_manifest }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -s "$MANIFEST" ]; then
+          echo "No source tarballs to cache back (manifest empty or missing): $MANIFEST"
+          exit 0
+        fi
+
+        while IFS=$'\t' read -r local rel || [ -n "$local" ]; do
+          [ -z "$local" ] && continue
+          if [ ! -f "$local" ]; then
+            echo "ERROR: cache-back source not found: $local" >&2
+            exit 1
+          fi
+          target="${TARGET_REPO}/sources/${rel}"
+          echo "Caching source $local -> $target"
+          jf rt upload \
+            --server-id="$SERVER_ID" \
+            --flat=true \
+            "$local" \
+            "$target"
+        done < "$MANIFEST"

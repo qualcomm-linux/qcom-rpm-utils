@@ -1,0 +1,132 @@
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# =============================================================================
+# Reusable RPM release workflow
+# =============================================================================
+# Called by pkg-rpm-* packaging repos to build and publish a released RPM to
+# JFrog Artifactory. Mirrors the Ubuntu pkg-release-reusable-workflow.yml:
+#   1. build   - reuses pkg-build-reusable-workflow.yml (release=true, so any
+#                upstream-fetched source tarballs are cached back).
+#   2. publish - gated by the `pkg-release-approval` environment; downloads the
+#                build artifact and uploads the RPMs to Artifactory.
+# =============================================================================
+name: Reusable RPM Release
+
+on:
+  workflow_call:
+    inputs:
+      qcom-rpm-utils-ref:
+        description: "Git ref of qcom-rpm-utils to pin the build tooling to"
+        type: string
+        required: false
+        default: main
+      base-image:
+        description: "Override the rpmbuild base image"
+        type: string
+        required: false
+        default: ""
+      extra-repo:
+        description: "Extra dnf repo URL to register for BuildRequires resolution"
+        type: string
+        required: false
+        default: ""
+      cache-base-url:
+        description: "Base URL of the lookaside cache holding source tarballs"
+        type: string
+        required: true
+      cache-path-template:
+        description: "Lookaside path template appended to cache-base-url"
+        type: string
+        required: false
+        default: "{filename}/{hashtype}/{hash}/{filename}"
+      server-url:
+        description: "Artifactory server URL"
+        type: string
+        required: false
+        default: "https://qartifactory.qualcomm.com"
+      target-repo:
+        description: "Artifactory YUM/RPM repo to publish to"
+        type: string
+        required: false
+        default: "qualcomm-dnf-repo"
+    secrets:
+      QSC_API_KEY:
+        description: "QSC API key used to obtain an Artifactory access token"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/pkg-build-reusable-workflow.yml
+    with:
+      qcom-rpm-utils-ref: ${{ inputs.qcom-rpm-utils-ref }}
+      base-image: ${{ inputs.base-image }}
+      extra-repo: ${{ inputs.extra-repo }}
+      release: true
+      cache-base-url: ${{ inputs.cache-base-url }}
+      cache-path-template: ${{ inputs.cache-path-template }}
+      target-repo: ${{ inputs.target-repo }}
+    secrets:
+      QSC_API_KEY: ${{ secrets.QSC_API_KEY }}
+
+  publish:
+    name: Publish to Artifactory
+    needs: build
+    runs-on: [self-hosted]
+    environment: pkg-release-approval
+    steps:
+      - name: Checkout tooling (qcom-rpm-utils)
+        uses: actions/checkout@v4
+        with:
+          repository: qualcomm-linux/qcom-rpm-utils
+          ref: ${{ inputs.qcom-rpm-utils-ref }}
+          path: qcom-rpm-utils
+          sparse-checkout: .github/actions
+
+      - name: Download built RPMs
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: output
+
+      - name: Build provenance metadata
+        id: prov
+        run: |
+          set -euo pipefail
+          workflow_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          jq -n \
+            --arg commit "${{ github.sha }}" \
+            --arg workflow "$workflow_url" \
+            --arg pkg "${{ needs.build.outputs.pkg-name }}" \
+            --arg version "${{ needs.build.outputs.pkg-version }}" \
+            '{commit:$commit, workflow:$workflow, pkg:$pkg, version:$version}' \
+            > provenance.json
+          {
+            echo 'provenance<<EOF'
+            cat provenance.json
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload RPMs to Artifactory
+        uses: ./qcom-rpm-utils/.github/actions/rpm-artifactory-upload
+        with:
+          server_url: ${{ inputs.server-url }}
+          target_repo: ${{ inputs.target-repo }}
+          target_subpath: ${{ needs.build.outputs.pkg-name }}/${{ needs.build.outputs.pkg-version }}
+          rpm_dir: output
+          provenance_info: ${{ steps.prov.outputs.provenance }}
+          qsc_api_key: ${{ secrets.QSC_API_KEY }}
+
+      - name: Job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Published RPMs"
+            echo ""
+            echo "- Package: \`${{ needs.build.outputs.pkg-name }}-${{ needs.build.outputs.pkg-version }}\`"
+            echo "- Repo:    \`${{ inputs.target-repo }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,219 @@
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# =============================================================================
+# Reusable RPM build workflow
+# =============================================================================
+# Called by pkg-rpm-* packaging repos (and by pkg-release-reusable-workflow.yml)
+# to build the package's RPM(s) from a `sources` file + a `.spec`.
+#
+# =============================================================================
+name: Reusable RPM Build
+
+on:
+  workflow_call:
+    inputs:
+      qcom-rpm-utils-ref:
+        description: "Git ref of qcom-rpm-utils to pin the build tooling to"
+        type: string
+        required: false
+        default: main
+      base-image:
+        description: "Override the rpmbuild base image"
+        type: string
+        required: false
+        default: ""
+      extra-repo:
+        description: "Extra dnf repo URL to register for BuildRequires resolution"
+        type: string
+        required: false
+        default: ""
+      release:
+        description: "Release build: cache verified upstream tarballs back to Artifactory"
+        type: boolean
+        required: false
+        default: false
+      cache-base-url:
+        description: "Base URL of the lookaside cache holding source tarballs"
+        type: string
+        required: true
+      cache-path-template:
+        description: "Lookaside path template appended to cache-base-url"
+        type: string
+        required: false
+        default: "{filename}/{hashtype}/{hash}/{filename}"
+      target-repo:
+        description: "Artifactory repo for source cache-back (release only)"
+        type: string
+        required: false
+        default: "qualcomm-dnf-repo"
+    secrets:
+      QSC_API_KEY:
+        description: "QSC API key for caching source tarballs back to Artifactory (release only)"
+        required: false
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded RPM build artifact"
+        value: ${{ jobs.build.outputs.artifact-name }}
+      pkg-name:
+        description: "Package name resolved from the spec"
+        value: ${{ jobs.build.outputs.pkg-name }}
+      pkg-version:
+        description: "Package version resolved from the spec"
+        value: ${{ jobs.build.outputs.pkg-version }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build RPM
+    runs-on: [self-hosted]
+    outputs:
+      artifact-name: ${{ steps.meta.outputs.artifact-name }}
+      pkg-name: ${{ steps.meta.outputs.pkg-name }}
+      pkg-version: ${{ steps.meta.outputs.pkg-version }}
+    steps:
+      - name: Checkout package repo
+        uses: actions/checkout@v4
+        with:
+          path: pkg
+
+      - name: Checkout build tooling (qcom-rpm-utils)
+        uses: actions/checkout@v4
+        with:
+          repository: qualcomm-linux/qcom-rpm-utils
+          ref: ${{ inputs.qcom-rpm-utils-ref }}
+          path: qcom-rpm-utils
+          sparse-checkout: |
+            scripts
+            .github/actions
+
+      - name: Install rpm tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm rpmdevtools
+
+      - name: Locate spec file
+        id: spec
+        working-directory: pkg
+        run: |
+          set -euo pipefail
+          mapfile -t specs < <(find . -maxdepth 1 -name '*.spec' -type f | sort)
+          if [[ "${#specs[@]}" -eq 0 ]]; then
+            echo "::error::No '*.spec' file found at the repo root." >&2
+            exit 1
+          fi
+          if [[ "${#specs[@]}" -gt 1 ]]; then
+            echo "::error::Multiple spec files found (${specs[*]}). One package per repo." >&2
+            exit 1
+          fi
+          echo "spec=${specs[0]}" >> "$GITHUB_OUTPUT"
+          echo "Using spec: ${specs[0]}"
+
+      - name: Resolve and verify source tarballs
+        id: sources
+        working-directory: pkg
+        env:
+          CACHE_BASE_URL: ${{ inputs.cache-base-url }}
+          CACHE_PATH_TEMPLATE: ${{ inputs.cache-path-template }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f sources ]]; then
+            echo "::error::No 'sources' file found at the repo root." >&2
+            exit 1
+          fi
+          if [[ -z "${CACHE_BASE_URL}" ]]; then
+            echo "::error::cache-base-url is empty. Set the CACHE_BASE_URL Actions variable." >&2
+            exit 1
+          fi
+          emit=""
+          if [[ "${{ inputs.release }}" == "true" ]]; then
+            emit="--emit-cache-uploads"
+          fi
+          bash ../qcom-rpm-utils/scripts/resolve-sources.sh \
+            --sources sources \
+            --spec "${{ steps.spec.outputs.spec }}" \
+            --cache-base-url "${CACHE_BASE_URL}" \
+            --path-template "${CACHE_PATH_TEMPLATE}" \
+            --dest sources-cache \
+            ${emit}
+
+      - name: Cache source tarballs back to Artifactory
+        if: ${{ inputs.release && hashFiles('pkg/sources-cache/.cache-uploads') != '' }}
+        uses: ./qcom-rpm-utils/.github/actions/rpm-artifactory-upload
+        with:
+          target_repo: ${{ inputs.target-repo }}
+          rpm_dir: pkg/sources-cache
+          cache_uploads_manifest: pkg/sources-cache/.cache-uploads
+          qsc_api_key: ${{ secrets.QSC_API_KEY }}
+
+      - name: Build RPMs
+        working-directory: pkg
+        run: |
+          set -euo pipefail
+          chmod +x ../qcom-rpm-utils/scripts/build-rpm.sh
+          args=(--tarball "${{ steps.sources.outputs.tarball }}"
+                --spec "${{ steps.spec.outputs.spec }}"
+                --output ./output)
+          if [[ -n "${{ inputs.base-image }}" ]]; then
+            args+=(--base-image "${{ inputs.base-image }}")
+          fi
+          if [[ -n "${{ inputs.extra-repo }}" ]]; then
+            args+=(--extra-repo "${{ inputs.extra-repo }}")
+          fi
+          ../qcom-rpm-utils/scripts/build-rpm.sh "${args[@]}"
+
+      - name: Checksum built packages
+        working-directory: pkg
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          rpms=(output/*.rpm)
+          if [[ "${#rpms[@]}" -eq 0 ]]; then
+            echo "::error::Build produced no RPMs." >&2
+            exit 1
+          fi
+          (cd output && sha256sum ./*.rpm | tee sha256sums.txt)
+
+      - name: Resolve package metadata
+        id: meta
+        working-directory: pkg
+        run: |
+          set -euo pipefail
+          name="$(rpmspec -q --srpm --qf '%{name}\n' "${{ steps.spec.outputs.spec }}" 2>/dev/null | head -n1 || true)"
+          version="$(rpmspec -q --srpm --qf '%{version}\n' "${{ steps.spec.outputs.spec }}" 2>/dev/null | head -n1 || true)"
+          artifact="rpms-${name:-pkg}-${{ github.run_id }}"
+          {
+            echo "pkg-name=${name}"
+            echo "pkg-version=${version}"
+            echo "artifact-name=${artifact}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload built RPMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact-name }}
+          path: |
+            pkg/output/*.rpm
+            pkg/output/sha256sums.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Job summary
+        if: always()
+        working-directory: pkg
+        run: |
+          set -euo pipefail
+          {
+            echo "## Built packages"
+            if compgen -G "output/*.rpm" > /dev/null; then
+              echo ""
+              echo '```'
+              (cd output && ls -1 ./*.rpm)
+              echo '```'
+            else
+              echo ""
+              echo "_No packages were produced._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

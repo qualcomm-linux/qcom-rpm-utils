@@ -87,7 +87,7 @@ jobs:
           sparse-checkout: .github/actions
 
       - name: Download built RPMs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: output

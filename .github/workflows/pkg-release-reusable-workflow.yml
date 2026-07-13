@@ -79,7 +79,7 @@ jobs:
     environment: pkg-release-approval
     steps:
       - name: Checkout tooling (qcom-rpm-utils)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: qualcomm-linux/qcom-rpm-utils
           ref: ${{ inputs.qcom-rpm-utils-ref }}

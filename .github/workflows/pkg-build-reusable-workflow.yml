@@ -48,7 +48,10 @@ on:
         default: "qualcomm-dnf-repo"
     secrets:
       QSC_API_KEY:
-        description: "QSC API key for caching source tarballs back to Artifactory (release only)"
+        description: "QSC API key for caching source tarballs back to Artifactory (release only). Takes precedence over ARTIFACTORY_ACCESS_TOKEN when both are set."
+        required: false
+      ARTIFACTORY_ACCESS_TOKEN:
+        description: "Pre-generated Artifactory access token for cache-back (release only). Used when QSC_API_KEY is not set."
         required: false
     outputs:
       artifact-name:
@@ -147,6 +150,7 @@ jobs:
           rpm_dir: pkg/sources-cache
           cache_uploads_manifest: pkg/sources-cache/.cache-uploads
           qsc_api_key: ${{ secrets.QSC_API_KEY }}
+          access_token: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
 
       - name: Build RPMs
         working-directory: pkg

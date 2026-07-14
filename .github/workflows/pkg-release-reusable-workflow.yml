@@ -58,8 +58,11 @@ on:
         default: "10-stream/BaseOS/Packages"
     secrets:
       QSC_API_KEY:
-        description: "QSC API key used to obtain an Artifactory access token"
-        required: true
+        description: "QSC API key used to obtain an Artifactory access token. Takes precedence over ARTIFACTORY_ACCESS_TOKEN when both are set."
+        required: false
+      ARTIFACTORY_ACCESS_TOKEN:
+        description: "Pre-generated Artifactory access token. Used when QSC_API_KEY is not set."
+        required: false
 
 permissions:
   contents: read
@@ -78,6 +81,7 @@ jobs:
       target-repo: ${{ inputs.target-repo }}
     secrets:
       QSC_API_KEY: ${{ secrets.QSC_API_KEY }}
+      ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
 
   publish:
     name: Publish to Artifactory
@@ -126,6 +130,7 @@ jobs:
           rpm_dir: output
           provenance_info: ${{ steps.prov.outputs.provenance }}
           qsc_api_key: ${{ secrets.QSC_API_KEY }}
+          access_token: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
 
       - name: Job summary
         if: always()

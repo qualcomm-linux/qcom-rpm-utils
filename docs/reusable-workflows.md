@@ -56,8 +56,10 @@ Build the RPM(s). Used by the PR workflow and by the release workflow.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
 `cache-path-template`, `base-image`, `extra-repo`, `release`,
-`target-repo`. **Secrets:** `QSC_API_KEY` (only needed when `release: true`,
-for source cache-back). **Outputs:** `artifact-name`, `pkg-name`, `pkg-version`.
+`target-repo`. **Secrets:** `ARTIFACTORY_ACCESS_TOKEN` and/or `QSC_API_KEY`
+(only needed when `release: true`, for source cache-back — see
+[Authentication](#authentication)). **Outputs:** `artifact-name`, `pkg-name`,
+`pkg-version`.
 
 Caller example (PR build, read-only cache):
 
@@ -78,13 +80,17 @@ before anything is uploaded.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
 `server-url`, `target-repo` (default `qualcomm-dnf-repo`), `target-subpath`
-(default `10-stream/BaseOS/Packages`). **Secrets:** `QSC_API_KEY` (**required**).
+(default `10-stream/BaseOS/Packages`). **Secrets:** `ARTIFACTORY_ACCESS_TOKEN`
+and/or `QSC_API_KEY` (**at least one required** — see
+[Authentication](#authentication)).
 
 All built RPMs are uploaded flat into `<target-repo>/<target-subpath>/`, i.e.
-`qualcomm-dnf-repo/10-stream/BaseOS/Packages/`. The YUM `repodata/` is **not**
-uploaded by the workflow — Artifactory's YUM indexer calculates it. Setting the
-repo's **YUM Metadata Folder Depth to `2`** will write metadata to
-`qualcomm-dnf-repo/10-stream/BaseOS/repodata/`, alongside the `Packages/` dir.
+`qualcomm-dnf-repo/10-stream/BaseOS/Packages/`. Binary and source RPMs alike are
+dumped directly into that directory — no `src/` or `output/` subfolders. The YUM
+`repodata/` is **not** uploaded by the workflow — Artifactory's YUM indexer
+calculates it. Setting the repo's **YUM Metadata Folder Depth to `2`** will write
+metadata to `qualcomm-dnf-repo/10-stream/BaseOS/repodata/`, alongside the
+`Packages/` dir.
 
 Caller example:
 
@@ -96,13 +102,38 @@ jobs:
       qcom-rpm-utils-ref: main
       cache-base-url: ${{ vars.CACHE_BASE_URL }}
     secrets:
-      QSC_API_KEY: ${{ secrets.QSC_API_KEY }}
+      # Provide the Artifactory access token (QSC_API_KEY flow comes later).
+      ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
 ```
+
+## Authentication
+
+Publishing (and release-time source cache-back) needs Artifactory credentials.
+The composite action accepts **two** mutually-exclusive secrets and resolves
+them in this order:
+
+1. **`QSC_API_KEY`** — if set, it is exchanged for a short-lived Artifactory
+   access token via the QSC token API. **Takes precedence** over
+   `ARTIFACTORY_ACCESS_TOKEN`.
+2. **`ARTIFACTORY_ACCESS_TOKEN`** — if `QSC_API_KEY` is not set, this
+   pre-generated access token is used directly.
+3. If **neither** is set, the publish/cache-back step fails.
+
+> **Current recommendation:** configure **`ARTIFACTORY_ACCESS_TOKEN`** only. The
+> `QSC_API_KEY` flow is wired up but not yet the recommended path; this doc will
+> be updated to prefer it once the QSC key issue is resolved.
+
+Whichever credential is used, the account behind it must have Deploy permission
+on the target repo and must be a member of the
+[`centos.rpm.devs`](https://lists.qualcomm.com/ListManager?id=centos.rpm.devs)
+Qualcomm list, or the upload will be rejected.
 
 ## Required configuration (in the calling repo)
 
 | Name | Kind | Purpose |
 |---|---|---|
 | `CACHE_BASE_URL` | Actions **variable** | Base URL of the lookaside cache (e.g. the Artifactory `qualcomm-dnf-repo/sources` base). |
-| `QSC_API_KEY` | Actions **secret** | Generates the Artifactory access token for publishing / cache-back. Release only. |
+| `ARTIFACTORY_ACCESS_TOKEN` | Actions **secret** | Pre-generated Artifactory access token for publishing / cache-back. Release only. **Currently the recommended credential.** |
+| `QSC_API_KEY` | Actions **secret** | QSC API key exchanged for an Artifactory token; takes precedence over `ARTIFACTORY_ACCESS_TOKEN` when set. Release only. (Not yet the recommended path.) |
+| `centos.rpm.devs` membership | Qualcomm list | The publishing account must belong to [`centos.rpm.devs`](https://lists.qualcomm.com/ListManager?id=centos.rpm.devs) for uploads to be accepted. |
 | `pkg-release-approval` | Environment | Approval gate for the publish job. Add required reviewers. |

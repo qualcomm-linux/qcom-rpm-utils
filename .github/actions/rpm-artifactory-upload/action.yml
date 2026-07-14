@@ -40,11 +40,11 @@ inputs:
     default: "{}"
 
   access_token:
-    description: "Artifactory access token (mutually exclusive with qsc_api_key)"
+    description: "Pre-generated Artifactory access token. Used directly when qsc_api_key is not set."
     required: false
 
   qsc_api_key:
-    description: "QSC API key - used to generate a temporary access token (mutually exclusive with access_token)"
+    description: "QSC API key. When set, it is exchanged for a temporary Artifactory access token."
     required: false
 
   access_token_data:
@@ -92,7 +92,7 @@ runs:
       with:
         version: 2.113.0
 
-    - name: Generate access token if qsc_api_key is provided, otherwise use provided access_token
+    - name: Resolve Artifactory access token
       id: gen_token
       shell: bash
       env:
@@ -104,17 +104,15 @@ runs:
         set -euo pipefail
 
         if [ -z "$QSC_API_KEY" ] && [ -z "$ACCESS_TOKEN" ]; then
-          echo "ERROR: Neither qsc_api_key nor access_token provided."
+          echo "ERROR: Neither qsc_api_key nor access_token provided." >&2
           exit 1
         fi
 
-        if [ -n "$QSC_API_KEY" ] && [ -n "$ACCESS_TOKEN" ]; then
-          echo "ERROR: Both qsc_api_key and access_token were provided. These are not compatible."
-          exit 1
-        fi
-
-        if [ -n "$ACCESS_TOKEN" ]; then
-          echo "Using provided access_token..."
+        # QSC key takes precedence: exchange it for a temporary token. When it
+        # is absent, fall back to the pre-generated access_token as-is.
+        if [ -z "$QSC_API_KEY" ]; then
+          echo "No qsc_api_key provided; using the pre-generated access_token."
+          echo "::add-mask::$ACCESS_TOKEN"
           echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
           exit 0
         fi
@@ -129,11 +127,11 @@ runs:
 
         token=$(echo "$response" | jq -r '.token')
         if [ -z "$token" ] || [ "$token" = "null" ]; then
-          echo "ERROR: Failed to generate access token from qsc_api_key."
-          echo "Response was: $response"
+          echo "ERROR: Failed to generate access token from qsc_api_key." >&2
           exit 1
         fi
 
+        echo "::add-mask::$token"
         echo "access_token=$token" >> "$GITHUB_OUTPUT"
         echo "Access token generated successfully."
 
@@ -198,18 +196,13 @@ runs:
           arch="${base%.rpm}"; arch="${arch##*.}"
           fileprops="${PROPS:+${PROPS};}rpm.arch=${arch}"
 
-          dest="$TARGET_DIR"
-          if [[ "$base" == *.src.rpm ]]; then
-            dest="${TARGET_DIR}src/"
-          fi
-
-          echo "Uploading $base (arch=${arch}) -> $dest"
+          echo "Uploading $base (arch=${arch}) -> $TARGET_DIR"
           jf rt upload \
             --server-id="$SERVER_ID" \
             --flat=true \
             --target-props "${fileprops}" \
             "$f" \
-            "$dest"
+            "$TARGET_DIR"
         done
 
     - name: Cache back source tarballs

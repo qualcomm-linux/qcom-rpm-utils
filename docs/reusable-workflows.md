@@ -77,8 +77,14 @@ Build then publish to Artifactory. The `publish` job runs in the
 before anything is uploaded.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
-`server-url`, `target-repo` (default `qualcomm-dnf-repo`). **Secrets:**
-`QSC_API_KEY` (**required**).
+`server-url`, `target-repo` (default `qualcomm-dnf-repo`), `target-subpath`
+(default `10-stream/BaseOS/Packages`). **Secrets:** `QSC_API_KEY` (**required**).
+
+All built RPMs are uploaded flat into `<target-repo>/<target-subpath>/`, i.e.
+`qualcomm-dnf-repo/10-stream/BaseOS/Packages/`. The YUM `repodata/` is **not**
+uploaded by the workflow — Artifactory's YUM indexer calculates it. Setting the
+repo's **YUM Metadata Folder Depth to `2`** will write metadata to
+`qualcomm-dnf-repo/10-stream/BaseOS/repodata/`, alongside the `Packages/` dir.
 
 Caller example:
 

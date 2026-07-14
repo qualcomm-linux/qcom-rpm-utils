@@ -49,6 +49,13 @@ on:
         type: string
         required: false
         default: "qualcomm-dnf-repo"
+      target-subpath:
+        description: >
+          Subpath under target-repo to publish RPMs into. All RPMs are dumped
+          flat here.
+        type: string
+        required: false
+        default: "10-stream/BaseOS/Packages"
     secrets:
       QSC_API_KEY:
         description: "QSC API key used to obtain an Artifactory access token"
@@ -115,7 +122,7 @@ jobs:
         with:
           server_url: ${{ inputs.server-url }}
           target_repo: ${{ inputs.target-repo }}
-          target_subpath: ${{ needs.build.outputs.pkg-name }}/${{ needs.build.outputs.pkg-version }}
+          target_subpath: ${{ inputs.target-subpath }}
           rpm_dir: output
           provenance_info: ${{ steps.prov.outputs.provenance }}
           qsc_api_key: ${{ secrets.QSC_API_KEY }}

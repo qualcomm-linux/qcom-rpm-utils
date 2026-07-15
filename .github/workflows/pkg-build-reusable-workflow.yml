@@ -70,7 +70,7 @@ permissions:
 jobs:
   build:
     name: Build RPM
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
     outputs:
       artifact-name: ${{ steps.meta.outputs.artifact-name }}
       pkg-name: ${{ steps.meta.outputs.pkg-name }}

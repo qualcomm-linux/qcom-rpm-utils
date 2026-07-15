@@ -86,7 +86,7 @@ jobs:
   publish:
     name: Publish to Artifactory
     needs: build
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
     environment: pkg-release-approval
     steps:
       - name: Checkout tooling (qcom-rpm-utils)

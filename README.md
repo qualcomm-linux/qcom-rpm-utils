@@ -10,8 +10,9 @@ This repository is the central home for the build scripts, container image, comp
 
 | Path | Role |
 |---|---|
-| [`scripts/build-rpm.sh`](scripts/build-rpm.sh) | Containerised `rpmbuild` driver (builds for the runner's host architecture). |
-| [`scripts/Dockerfile`](scripts/Dockerfile) | The RPM builder image used by `build-rpm.sh`. |
+| [`scripts/build-rpm.sh`](scripts/build-rpm.sh) | Runs the prebuilt `rpm-builder` container over a bind-mounted workspace (builds for the runner's host architecture). |
+| [`scripts/build-in-container.sh`](scripts/build-in-container.sh) | The per-package build that runs *inside* the container: `dnf builddep` + `rpmbuild -ba`. |
+| [`docker/Dockerfile.rpm-builder`](docker/Dockerfile.rpm-builder) | The `rpm-builder` toolchain image, published to GHCR by [`publish-rpm-builder.yml`](.github/workflows/publish-rpm-builder.yml). |
 | [`scripts/resolve-sources.sh`](scripts/resolve-sources.sh) | dist-git `sources` resolver: cache lookup → upstream fallback → checksum verify → cache-back. |
 | [`.github/actions/rpm-artifactory-upload`](.github/actions/rpm-artifactory-upload/action.yml) | Composite action that uploads RPMs/SRPMs (and source tarballs) to JFrog Artifactory. |
 | [`.github/workflows/pkg-build-reusable-workflow.yml`](.github/workflows/pkg-build-reusable-workflow.yml) | `workflow_call` build workflow. |
@@ -29,7 +30,7 @@ pkg-rpm-<component> (caller)                 qcom-rpm-utils (this repo)
   pkg-release.yml  ──uses──▶  pkg-release-reusable-workflow.yml
                                      │
                                      ├─ resolve-sources.sh   (cache → upstream → verify)
-                                     ├─ build-rpm.sh + Dockerfile  (host-arch rpmbuild)
+                                     ├─ build-rpm.sh → rpm-builder container  (host-arch rpmbuild)
                                      └─ rpm-artifactory-upload     (QSC key → token → jf rt upload)
 ```
 
@@ -61,7 +62,7 @@ Builds the RPM(s). Used by the PR workflow and internally by the release workflo
 |---|---|---|---|
 | `cache-base-url` | **yes** | — | Base URL of the Artifactory lookaside cache. |
 | `qcom-rpm-utils-ref` | no | `main` | Git ref of this repo to pin the tooling to. |
-| `base-image` | no | `""` | Override the rpmbuild base image. |
+| `builder-image` | no | `""` | Override the `rpm-builder` toolchain image (defaults to `ghcr.io/<owner>/rpm-builder:centos10`). |
 | `extra-repo` | no | `""` | Extra dnf repo URL for `BuildRequires` resolution. |
 | `release` | no | `false` | Cache verified upstream tarballs back to Artifactory. |
 | `cache-path-template` | no | `{filename}/{hashtype}/{hash}/{filename}` | Lookaside path layout. |
@@ -83,7 +84,7 @@ Builds, then publishes to Artifactory behind the **`pkg-release-approval`** envi
 | `qcom-rpm-utils-ref` | no | `main` | Tooling ref. |
 | `server-url` | no | `https://qartifactory.qualcomm.com` | Artifactory server. |
 | `target-repo` | no | `qualcomm-dnf-repo` | Repo to publish into. |
-| `base-image` / `extra-repo` / `cache-path-template` | no | (as build) | Forwarded to the build. |
+| `builder-image` / `extra-repo` / `cache-path-template` | no | (as build) | Forwarded to the build. |
 
 | Secret | Req | Purpose |
 |---|---|---|
@@ -102,11 +103,11 @@ The `rpm-artifactory-upload` action authenticates to Artifactory by exchanging t
 ## Requirements
 
 **To call the reusable workflows:**
-- A self-hosted GitHub Actions runner (the workflows use `runs-on: [self-hosted]`) with **Docker** available.
+- A self-hosted GitHub Actions runner with **Docker** available.
 - The workflows install the `rpm` package on the runner and pull the builder base image on demand.
 
 **To run the scripts locally:**
-- `bash` and Docker — `build-rpm.sh` builds inside a container (default base image `quay.io/centos/centos:stream10`), so `rpmbuild` and build dependencies come from the image, not the host.
+- `bash` and Docker — `build-rpm.sh` runs the prebuilt `rpm-builder` container (default `ghcr.io/qualcomm-linux/rpm-builder:centos10`), so `rpmbuild` and the build toolchain come from the image, not the host. Override with `--builder-image` or `$RPM_BUILDER_IMAGE`.
 - `rpm`/`rpmspec` on the host if you use `resolve-sources.sh` directly.
 
 ---

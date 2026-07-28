@@ -20,8 +20,8 @@ on:
         type: string
         required: false
         default: main
-      base-image:
-        description: "Override the rpmbuild base image"
+      builder-image:
+        description: "Override the rpm-builder toolchain image (default: ghcr.io/<owner>/rpm-builder:centos10)"
         type: string
         required: false
         default: ""
@@ -66,6 +66,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build:
@@ -73,7 +74,7 @@ jobs:
     uses: ./.github/workflows/pkg-build-reusable-workflow.yml
     with:
       qcom-rpm-utils-ref: ${{ inputs.qcom-rpm-utils-ref }}
-      base-image: ${{ inputs.base-image }}
+      builder-image: ${{ inputs.builder-image }}
       extra-repo: ${{ inputs.extra-repo }}
       release: true
       cache-base-url: ${{ inputs.cache-base-url }}

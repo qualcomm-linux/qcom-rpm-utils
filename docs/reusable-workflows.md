@@ -16,8 +16,9 @@ These workflows turn that into built (and, on release, published) RPMs.
 
 | Path | Role |
 |---|---|
-| [`scripts/build-rpm.sh`](../scripts/build-rpm.sh) | Containerised `rpmbuild` driver (builds for the runner's host architecture). |
-| [`scripts/Dockerfile`](../scripts/Dockerfile) | The RPM builder image used by `build-rpm.sh`. |
+| [`scripts/build-rpm.sh`](../scripts/build-rpm.sh) | Runs the prebuilt `rpm-builder` container over a bind-mounted workspace (builds for the runner's host architecture). |
+| [`scripts/build-in-container.sh`](../scripts/build-in-container.sh) | The per-package build that runs *inside* the container: `dnf builddep` + `rpmbuild -ba`. |
+| [`docker/Dockerfile.rpm-builder`](../docker/Dockerfile.rpm-builder) | The `rpm-builder` toolchain image, published to GHCR by [`publish-rpm-builder.yml`](../.github/workflows/publish-rpm-builder.yml). |
 | [`scripts/resolve-sources.sh`](../scripts/resolve-sources.sh) | dist-git `sources` resolver: cache lookup → upstream fallback → checksum verify → cache-back. |
 | [`.github/actions/rpm-artifactory-upload`](../.github/actions/rpm-artifactory-upload/action.yml) | Composite action that uploads RPMs (and source tarballs) to JFrog Artifactory. |
 | [`.github/workflows/pkg-build-reusable-workflow.yml`](../.github/workflows/pkg-build-reusable-workflow.yml) | `workflow_call` build workflow. |
@@ -55,7 +56,7 @@ bumping versions; the first release build populates the cache automatically.
 Build the RPM(s). Used by the PR workflow and by the release workflow.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
-`cache-path-template`, `base-image`, `extra-repo`, `release`,
+`cache-path-template`, `builder-image`, `extra-repo`, `release`,
 `target-repo`. **Secrets:** `ARTIFACTORY_ACCESS_TOKEN` and/or `QSC_API_KEY`
 (only needed when `release: true`, for source cache-back — see
 [Authentication](#authentication)). **Outputs:** `artifact-name`, `pkg-name`,

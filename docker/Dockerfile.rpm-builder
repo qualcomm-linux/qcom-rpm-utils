@@ -1,0 +1,77 @@
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# =============================================================================
+# rpm-builder — a package-agnostic RPM build toolchain image.
+# =============================================================================
+# This image contains the build toolchain (rpmbuild + common build deps) plus
+# the Linux kernel build dependencies, no package-specific content. It is
+# built/refreshed weekly and published to a container registry as
+# `rpm-builder:centos10`, then consumed by:
+#   * build-rpm.sh (via `docker run`) for component RPMs, and
+#   * qualcomm-linux/rpm-images' kernel-rpm job (via `container:`),
+# so builds start with the toolchain already installed -- no per-build
+# `dnf install`.
+#
+# Spec-specific BuildRequires are still resolved at build time by
+# `dnf builddep` inside the running container (see build-in-container.sh).
+#
+# Build & publish (see .github/workflows/publish-rpm-builder.yml):
+#   docker build -f docker/Dockerfile.rpm-builder \
+#     -t ghcr.io/<owner>/rpm-builder:centos10 docker/
+#   docker push ghcr.io/<owner>/rpm-builder:centos10
+# =============================================================================
+ARG BASE_IMAGE=quay.io/centos/centos:stream10
+FROM ${BASE_IMAGE}
+
+# CRB + EPEL widen the set of resolvable BuildRequires. The toolchain itself is
+# the standard rpmbuild stack plus common compilers/archivers.
+RUN dnf -y install dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf -y install \
+        https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm \
+    && dnf -y update \
+    && dnf -y install \
+        rpm-build \
+        rpmdevtools \
+        gcc \
+        gcc-c++ \
+        make \
+        cmake \
+        git \
+        wget \
+        curl \
+        tar \
+        gzip \
+        bzip2 \
+        xz \
+        patch \
+        diffutils \
+        jq \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Linux kernel build dependencies, so qualcomm-linux/rpm-images' kernel-rpm job
+# can use this image directly (no per-run install). Mirrors the package list in
+# build_binrpm_pkg.py's check_dependencies() and the build-kernel-rpm action.
+RUN dnf -y install --allowerasing \
+        bc \
+        bison \
+        flex \
+        perl \
+        python3 \
+        openssl \
+        openssl-devel \
+        elfutils-libelf-devel \
+        elfutils-devel \
+        rsync \
+        findutils \
+        coreutils \
+        kmod \
+        dwarves \
+        hostname \
+        which \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+WORKDIR /workspace
+CMD ["bash"]

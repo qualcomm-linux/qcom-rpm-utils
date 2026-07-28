@@ -1,0 +1,77 @@
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# =============================================================================
+# Build and publish the rpm-builder RPM toolchain image to GHCR.
+# =============================================================================
+# Mirrors qualcomm-linux/docker-pkg-build's container-build-and-upload.yml:
+# build the image, then push to GHCR on trusted events only (never on
+# pull_request). build-rpm.sh `docker run`s this image, so build jobs skip
+# the per-build toolchain install.
+#
+# Published as: ghcr.io/<owner>/rpm-builder:centos10
+# =============================================================================
+name: Publish rpm-builder image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/Dockerfile.rpm-builder
+      - .github/workflows/publish-rpm-builder.yml
+  schedule:
+    # Weekly refresh. 00:17 UTC Monday.
+    - cron: "17 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: rpm-builder
+  IMAGE_TAG: centos10
+
+jobs:
+  build-and-push:
+    name: Build & push rpm-builder
+    runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image ref (lowercased owner)
+        id: img
+        run: |
+          set -euo pipefail
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ref=ghcr.io/${owner}/${IMAGE_NAME}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          docker build \
+            -f docker/Dockerfile.rpm-builder \
+            -t "${{ steps.img.outputs.ref }}" \
+            docker/
+
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: ${{ github.event_name != 'pull_request' }}
+        run: docker push "${{ steps.img.outputs.ref }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## rpm-builder image"
+            echo ""
+            echo "- Ref: \`${{ steps.img.outputs.ref }}\`"
+            echo "- Pushed: \`${{ github.event_name != 'pull_request' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -121,6 +121,8 @@ jobs:
         env:
           CACHE_BASE_URL: ${{ inputs.cache-base-url }}
           CACHE_PATH_TEMPLATE: ${{ inputs.cache-path-template }}
+          SPEC_FILE: ${{ steps.spec.outputs.spec }}
+          IS_RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
           if [[ ! -f sources ]]; then
@@ -132,12 +134,12 @@ jobs:
             exit 1
           fi
           emit=""
-          if [[ "${{ inputs.release }}" == "true" ]]; then
+          if [[ "${IS_RELEASE}" == "true" ]]; then
             emit="--emit-cache-uploads"
           fi
           bash ../qcom-rpm-utils/scripts/resolve-sources.sh \
             --sources sources \
-            --spec "${{ steps.spec.outputs.spec }}" \
+            --spec "${SPEC_FILE}" \
             --cache-base-url "${CACHE_BASE_URL}" \
             --path-template "${CACHE_PATH_TEMPLATE}" \
             --dest sources-cache \
@@ -165,6 +167,9 @@ jobs:
         env:
           BUILDER_IMAGE_INPUT: ${{ inputs.builder-image }}
           REPO_OWNER: ${{ github.repository_owner }}
+          TARBALL: ${{ steps.sources.outputs.tarball }}
+          SPEC_FILE: ${{ steps.spec.outputs.spec }}
+          EXTRA_REPO: ${{ inputs.extra-repo }}
         run: |
           set -euo pipefail
           chmod +x ../qcom-rpm-utils/scripts/build-rpm.sh
@@ -173,12 +178,12 @@ jobs:
             owner="$(echo "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
             builder_image="ghcr.io/${owner}/rpm-builder:centos10"
           fi
-          args=(--tarball "${{ steps.sources.outputs.tarball }}"
-                --spec "${{ steps.spec.outputs.spec }}"
+          args=(--tarball "${TARBALL}"
+                --spec "${SPEC_FILE}"
                 --output ./output
                 --builder-image "${builder_image}")
-          if [[ -n "${{ inputs.extra-repo }}" ]]; then
-            args+=(--extra-repo "${{ inputs.extra-repo }}")
+          if [[ -n "${EXTRA_REPO}" ]]; then
+            args+=(--extra-repo "${EXTRA_REPO}")
           fi
           ../qcom-rpm-utils/scripts/build-rpm.sh "${args[@]}"
 
@@ -197,11 +202,14 @@ jobs:
       - name: Resolve package metadata
         id: meta
         working-directory: pkg
+        env:
+          SPEC_FILE: ${{ steps.spec.outputs.spec }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          name="$(rpmspec -q --srpm --qf '%{name}\n' "${{ steps.spec.outputs.spec }}" 2>/dev/null | head -n1 || true)"
-          version="$(rpmspec -q --srpm --qf '%{version}\n' "${{ steps.spec.outputs.spec }}" 2>/dev/null | head -n1 || true)"
-          artifact="rpms-${name:-pkg}-${{ github.run_id }}"
+          name="$(rpmspec -q --srpm --qf '%{name}\n' "${SPEC_FILE}" 2>/dev/null | head -n1 || true)"
+          version="$(rpmspec -q --srpm --qf '%{version}\n' "${SPEC_FILE}" 2>/dev/null | head -n1 || true)"
+          artifact="rpms-${name:-pkg}-${RUN_ID}"
           {
             echo "pkg-name=${name}"
             echo "pkg-version=${version}"

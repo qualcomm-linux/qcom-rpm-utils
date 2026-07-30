@@ -106,14 +106,21 @@ jobs:
 
       - name: Build provenance metadata
         id: prov
+        env:
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          PKG_NAME: ${{ needs.build.outputs.pkg-name }}
+          PKG_VERSION: ${{ needs.build.outputs.pkg-version }}
         run: |
           set -euo pipefail
-          workflow_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          workflow_url="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
           jq -n \
-            --arg commit "${{ github.sha }}" \
+            --arg commit "${COMMIT_SHA}" \
             --arg workflow "$workflow_url" \
-            --arg pkg "${{ needs.build.outputs.pkg-name }}" \
-            --arg version "${{ needs.build.outputs.pkg-version }}" \
+            --arg pkg "${PKG_NAME}" \
+            --arg version "${PKG_VERSION}" \
             '{commit:$commit, workflow:$workflow, pkg:$pkg, version:$version}' \
             > provenance.json
           {
@@ -135,11 +142,15 @@ jobs:
 
       - name: Job summary
         if: always()
+        env:
+          PKG_NAME: ${{ needs.build.outputs.pkg-name }}
+          PKG_VERSION: ${{ needs.build.outputs.pkg-version }}
+          TARGET_REPO: ${{ inputs.target-repo }}
         run: |
           set -euo pipefail
           {
             echo "## Published RPMs"
             echo ""
-            echo "- Package: \`${{ needs.build.outputs.pkg-name }}-${{ needs.build.outputs.pkg-version }}\`"
-            echo "- Repo:    \`${{ inputs.target-repo }}\`"
+            echo "- Package: \`${PKG_NAME}-${PKG_VERSION}\`"
+            echo "- Repo:    \`${TARGET_REPO}\`"
           } >> "$GITHUB_STEP_SUMMARY"

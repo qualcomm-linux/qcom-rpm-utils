@@ -41,17 +41,21 @@ jobs:
 
       - name: Resolve image ref (lowercased owner)
         id: img
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          owner="$(echo "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
           echo "ref=ghcr.io/${owner}/${IMAGE_NAME}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build image
+        env:
+          IMAGE_REF: ${{ steps.img.outputs.ref }}
         run: |
           set -euo pipefail
           docker build \
             -f docker/Dockerfile.rpm-builder \
-            -t "${{ steps.img.outputs.ref }}" \
+            -t "${IMAGE_REF}" \
             docker/
 
       - name: Log in to GHCR
@@ -64,14 +68,19 @@ jobs:
 
       - name: Push image
         if: ${{ github.event_name != 'pull_request' }}
-        run: docker push "${{ steps.img.outputs.ref }}"
+        env:
+          IMAGE_REF: ${{ steps.img.outputs.ref }}
+        run: docker push "${IMAGE_REF}"
 
       - name: Summary
         if: always()
+        env:
+          IMAGE_REF: ${{ steps.img.outputs.ref }}
+          PUSHED: ${{ github.event_name != 'pull_request' }}
         run: |
           {
             echo "## rpm-builder image"
             echo ""
-            echo "- Ref: \`${{ steps.img.outputs.ref }}\`"
-            echo "- Pushed: \`${{ github.event_name != 'pull_request' }}\`"
+            echo "- Ref: \`${IMAGE_REF}\`"
+            echo "- Pushed: \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -37,7 +37,7 @@ jobs:
     runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve image ref (lowercased owner)
         id: img

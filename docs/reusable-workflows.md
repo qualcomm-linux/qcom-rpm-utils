@@ -37,8 +37,8 @@ SHA512 (mypackage-1.0.tar.gz) = 3a7bd3e2360a3d29...
 `resolve-sources.sh` processes each entry:
 
 1. **Cache lookup.** Compute the lookaside path
-   (default `{name}/{filename}/{hashtype}/{hash}/{filename}`, `{name}` = repo
-   name) under `--cache-base-url` and `HEAD`-query it.
+   (default `{filename}/{hashtype}/{hash}/{filename}`)
+   under `--cache-base-url` and `HEAD`-query it.
 2. **Cache hit** → download the tarball from the cache.
    **Cache miss** → expand the spec (`rpmspec -P`), find the `SourceN:` URL whose
    basename matches `filename`, and download from upstream.
@@ -56,7 +56,7 @@ bumping versions; the first release build populates the cache automatically.
 Build the RPM(s). Used by the PR workflow and by the release workflow.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
-`cache-path-template`, `builder-image`, `extra-repo`, `release`,
+`cache-path-template`, `builder-image`, `extra-repo`, `release`, `server-url`,
 `target-repo`. **Secrets:** `ARTIFACTORY_ACCESS_TOKEN` and/or `QSC_API_KEY`
 (only needed when `release: true`, for source cache-back — see
 [Authentication](#authentication)). **Outputs:** `artifact-name`, `pkg-name`,
@@ -80,18 +80,34 @@ Build then publish to Artifactory. The `publish` job runs in the
 before anything is uploaded.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
-`server-url`, `target-repo` (default `qualcomm-dnf-repo`), `target-subpath`
+`server-url`, `target-repo` (default `qsc-rpm-releases-stage`), `target-subpath`
 (default `10-stream/BaseOS/Packages`). **Secrets:** `ARTIFACTORY_ACCESS_TOKEN`
 and/or `QSC_API_KEY` (**at least one required** — see
 [Authentication](#authentication)).
 
-All built RPMs are uploaded flat into `<target-repo>/<target-subpath>/`, i.e.
-`qualcomm-dnf-repo/10-stream/BaseOS/Packages/`. Binary and source RPMs alike are
-dumped directly into that directory — no `src/` or `output/` subfolders. The YUM
-`repodata/` is **not** uploaded by the workflow — Artifactory's YUM indexer
-calculates it. Setting the repo's **YUM Metadata Folder Depth to `2`** will write
-metadata to `qualcomm-dnf-repo/10-stream/BaseOS/repodata/`, alongside the
-`Packages/` dir.
+`target-repo` is a repo name *plus* any path prefix under it. Artifactory grants
+are often scoped to a product subtree rather than a whole repo — e.g.
+`qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0` — so
+callers pass that prefix here. Both the RPM upload and the source cache-back
+derive their target from `target-repo`, so setting it once keeps both inside the
+permitted subtree; an upload outside it is rejected with `403`. Keep
+`cache-base-url` pointed at the matching `<target-repo>/sources`, or cache reads
+will never match cache-back writes.
+
+All built RPMs are uploaded flat into `<target-repo>/<target-subpath>/`. Binary
+and source RPMs alike are dumped directly into that directory — no `src/` or
+`output/` subfolders. The YUM `repodata/` is **not** uploaded by the workflow —
+Artifactory's YUM indexer calculates it. Set the repo's **YUM Metadata Folder
+Depth** (`yumRootDepth`) to the number of path segments above `Packages/` so the
+metadata lands beside it rather than at the repo root:
+
+| `<target-repo>` / `<target-subpath>` | Depth | `repodata/` written to |
+|---|---|---|
+| `<repo>` / `10-stream/BaseOS/Packages` | `2` | `<repo>/10-stream/BaseOS/repodata/` |
+| `<repo>/product/chip/software-product/<PRODUCT>/<version>` / `10-stream/BaseOS/Packages` | `7` | `…/<version>/10-stream/BaseOS/repodata/` |
+
+`yumRootDepth` is a single repo-wide setting, so every product tree in a repo
+must publish at the same nesting level.
 
 Caller example:
 
@@ -120,21 +136,12 @@ them in this order:
    pre-generated access token is used directly.
 3. If **neither** is set, the publish/cache-back step fails.
 
-> **Current recommendation:** configure **`ARTIFACTORY_ACCESS_TOKEN`** only. The
-> `QSC_API_KEY` flow is wired up but not yet the recommended path; this doc will
-> be updated to prefer it once the QSC key issue is resolved.
-
-Whichever credential is used, the account behind it must have Deploy permission
-on the target repo and must be a member of the
-[`centos.rpm.devs`](https://lists.qualcomm.com/ListManager?id=centos.rpm.devs)
-Qualcomm list, or the upload will be rejected.
 
 ## Required configuration (in the calling repo)
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `CACHE_BASE_URL` | Actions **variable** | Base URL of the lookaside cache (e.g. the Artifactory `qualcomm-dnf-repo/sources` base). |
+| `CACHE_BASE_URL` | Actions **variable** | Base URL of the lookaside cache. Must be `<server>/artifactory/<target-repo>/sources` so cache reads match cache-back writes. |
 | `ARTIFACTORY_ACCESS_TOKEN` | Actions **secret** | Pre-generated Artifactory access token for publishing / cache-back. Release only. **Currently the recommended credential.** |
 | `QSC_API_KEY` | Actions **secret** | QSC API key exchanged for an Artifactory token; takes precedence over `ARTIFACTORY_ACCESS_TOKEN` when set. Release only. (Not yet the recommended path.) |
-| `centos.rpm.devs` membership | Qualcomm list | The publishing account must belong to [`centos.rpm.devs`](https://lists.qualcomm.com/ListManager?id=centos.rpm.devs) for uploads to be accepted. |
 | `pkg-release-approval` | Environment | Approval gate for the publish job. Add required reviewers. |

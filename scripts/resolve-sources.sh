@@ -20,8 +20,9 @@
 #                           resolve SourceN: URLs on a cache miss).
 #   --cache-base-url <url>  Base URL of the lookaside cache (required).
 #   --dest <dir>            Directory to stage tarballs into (default: ./sources-cache).
-#   --name <pkg>            Lookaside namespace / package name. Defaults to
-#                           $GITHUB_REPOSITORY basename, else the spec's Name:.
+#   --name <pkg>            Lookaside namespace / package name. Defaults to the
+#                           spec's Name:, else the $GITHUB_REPOSITORY basename.
+#                           Only used when --path-template contains {name}.
 #   --path-template <tmpl>  Lookaside path template appended to the base URL.
 #                           Placeholders: {name} {filename} {hashtype} {hash}.
 #                           Default: {filename}/{hashtype}/{hash}/{filename}
@@ -84,13 +85,14 @@ if [[ -z "${CACHE_BASE_URL}" ]]; then
 fi
 
 if [[ -z "${PKG_NAME}" ]]; then
-    if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
-        PKG_NAME="${GITHUB_REPOSITORY##*/}"
-    elif command -v rpmspec >/dev/null 2>&1; then
+    if command -v rpmspec >/dev/null 2>&1; then
         PKG_NAME="$(rpmspec -q --srpm --qf '%{name}\n' "${SPEC_FILE}" 2>/dev/null | head -n1 || true)"
     fi
+    if [[ -z "${PKG_NAME}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+        PKG_NAME="${GITHUB_REPOSITORY##*/}"
+    fi
 fi
-if [[ -z "${PKG_NAME}" ]]; then
+if [[ -z "${PKG_NAME}" && "${PATH_TEMPLATE}" == *'{name}'* ]]; then
     echo "ERROR: could not determine package name; pass --name." >&2; exit 1
 fi
 

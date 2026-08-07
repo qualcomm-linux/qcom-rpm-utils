@@ -11,9 +11,9 @@ inputs:
     default: "https://qartifactory.qualcomm.com/"
 
   target_repo:
-    description: "Target YUM/RPM repo name (e.g. qualcomm-dnf-repo)"
+    description: "Target YUM/RPM repo name, optionally with a path prefix"
     required: false
-    default: "qualcomm-dnf-repo"
+    default: "qsc-rpm-releases-stage"
 
   rpm_dir:
     description: "Directory containing the built *.rpm / *.src.rpm files to upload"
@@ -40,12 +40,18 @@ inputs:
     default: "{}"
 
   access_token:
-    description: "Pre-generated Artifactory access token. Used directly when qsc_api_key is not set."
+    description: "Pre-generated Artifactory access token. Used directly when qsc_api_key is not set, and as a fallback if the qsc_api_key exchange fails."
     required: false
 
   qsc_api_key:
-    description: "QSC API key. When set, it is exchanged for a temporary Artifactory access token."
+    description: "QSC API key. When set, it is exchanged for a temporary Artifactory access token (takes precedence over access_token)."
     required: false
+
+  access_token_url:
+    description: >
+      QSC endpoint that exchanges qsc_api_key for an Artifactory token.
+    required: false
+    default: "https://api.qualcomm.com/softwarecenter/v1/chipSoftware/artifactory/tokens"
 
   access_token_data:
     description: "Access token data for generating access token - used in conjunction with qsc_api_key"
@@ -96,7 +102,7 @@ runs:
       id: gen_token
       shell: bash
       env:
-        ACCESS_TOKEN_URL: "https://api.qualcomm.com/softwarecenter/v1/chipSoftware/artifactory/tokens"
+        ACCESS_TOKEN_URL: ${{ inputs.access_token_url }}
         QSC_API_KEY: ${{ inputs.qsc_api_key }}
         ACCESS_TOKEN: ${{ inputs.access_token }}
         ACCESS_TOKEN_DATA: ${{ inputs.access_token_data }}
@@ -104,36 +110,70 @@ runs:
         set -euo pipefail
 
         if [ -z "$QSC_API_KEY" ] && [ -z "$ACCESS_TOKEN" ]; then
-          echo "ERROR: Neither qsc_api_key nor access_token provided." >&2
+          echo "::error::Neither qsc_api_key nor access_token provided. Set the" \
+               "QSC_API_KEY or ARTIFACTORY_ACCESS_TOKEN secret on the calling repo." >&2
           exit 1
         fi
+
+        emit_token() {
+          echo "::add-mask::$1"
+          echo "access_token=$1" >> "$GITHUB_OUTPUT"
+        }
 
         # QSC key takes precedence: exchange it for a temporary token. When it
         # is absent, fall back to the pre-generated access_token as-is.
         if [ -z "$QSC_API_KEY" ]; then
           echo "No qsc_api_key provided; using the pre-generated access_token."
-          echo "::add-mask::$ACCESS_TOKEN"
-          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+          emit_token "$ACCESS_TOKEN"
           exit 0
         fi
 
         echo "Generating access token using qsc_api_key..."
-        response=$(curl -s \
+        if [ -n "$ACCESS_TOKEN" ]; then
+          echo "Note: both credentials are set; qsc_api_key takes precedence." \
+               "The access_token is kept only as a fallback."
+        fi
+
+        http_code=""
+        body=""
+        if response=$(curl -sS \
+          -w '\n%{http_code}' \
+          --retry 3 --retry-delay 2 --max-time 60 \
           -X POST "$ACCESS_TOKEN_URL" \
           -H 'Content-Type: application/json' \
           -H 'X-QCOM-TokenType: apikey' \
           -H "Authorization: $QSC_API_KEY" \
-          -d "$ACCESS_TOKEN_DATA")
-
-        token=$(echo "$response" | jq -r '.token')
-        if [ -z "$token" ] || [ "$token" = "null" ]; then
-          echo "ERROR: Failed to generate access token from qsc_api_key." >&2
-          exit 1
+          -d "$ACCESS_TOKEN_DATA"); then
+          http_code="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "Token endpoint HTTP status: ${http_code}"
+          echo "Token endpoint response (token redacted):"
+          echo "$body" | jq 'if has("token") then .token = "***REDACTED***" else . end' 2>/dev/null \
+            || echo "$body" | sed -E 's/"token"[[:space:]]*:[[:space:]]*"[^"]*"/"token":"***REDACTED***"/g'
+        else
+          echo "Token endpoint request failed (curl exit $?)."
         fi
 
-        echo "::add-mask::$token"
-        echo "access_token=$token" >> "$GITHUB_OUTPUT"
-        echo "Access token generated successfully."
+        token="$(printf '%s' "$body" | jq -r '.token // empty' 2>/dev/null || true)"
+
+        if [ -n "$token" ]; then
+          emit_token "$token"
+          echo "Access token generated successfully."
+          exit 0
+        fi
+
+        # Exchange failed. Fall back to the pre-generated token when one exists,
+        # so a misconfigured or not-yet-live QSC key cannot block a release.
+        if [ -n "$ACCESS_TOKEN" ]; then
+          echo "::warning::Could not obtain a token from qsc_api_key (HTTP ${http_code:-n/a})." \
+               "Falling back to the pre-generated access_token."
+          emit_token "$ACCESS_TOKEN"
+          exit 0
+        fi
+
+        echo "::error::Failed to generate an access token from qsc_api_key"
+        echo "HTTP status: ${http_code:-n/a}"
+        exit 1
 
     - name: Configure JFrog server
       shell: bash

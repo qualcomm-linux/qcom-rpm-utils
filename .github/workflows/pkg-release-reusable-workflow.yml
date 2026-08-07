@@ -48,7 +48,7 @@ on:
         description: "Artifactory YUM/RPM repo to publish to"
         type: string
         required: false
-        default: "qualcomm-dnf-repo"
+        default: "qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0"
       target-subpath:
         description: >
           Subpath under target-repo to publish RPMs into. All RPMs are dumped
@@ -80,6 +80,7 @@ jobs:
       cache-base-url: ${{ inputs.cache-base-url }}
       cache-path-template: ${{ inputs.cache-path-template }}
       target-repo: ${{ inputs.target-repo }}
+      server-url: ${{ inputs.server-url }}
     secrets:
       QSC_API_KEY: ${{ secrets.QSC_API_KEY }}
       ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
@@ -90,6 +91,22 @@ jobs:
     runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
     environment: pkg-release-approval
     steps:
+      - name: Verify a publish credential is configured
+        env:
+          QSC_API_KEY: ${{ secrets.QSC_API_KEY }}
+          ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${QSC_API_KEY}" ]]; then
+            echo "Publish credential: QSC_API_KEY (an Artifactory token will be minted on demand)."
+          elif [[ -n "${ARTIFACTORY_ACCESS_TOKEN}" ]]; then
+            echo "Publish credential: ARTIFACTORY_ACCESS_TOKEN (pre-generated)."
+          else
+            echo "::error::No publish credential. Set either the QSC_API_KEY or the" \
+                 "ARTIFACTORY_ACCESS_TOKEN secret" \
+            exit 1
+          fi
+
       - name: Checkout tooling (qcom-rpm-utils)
         uses: actions/checkout@v7
         with:

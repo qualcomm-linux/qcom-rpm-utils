@@ -22,92 +22,10 @@ See [`docs/reusable-workflows.md`](docs/reusable-workflows.md) for the deep-dive
 
 ---
 
-## How the pieces fit together
-
-```
-pkg-rpm-<component> (caller)                 qcom-rpm-utils (this repo)
-  build-on-pr.yml  ──uses──▶  pkg-build-reusable-workflow.yml
-  pkg-release.yml  ──uses──▶  pkg-release-reusable-workflow.yml
-                                     │
-                                     ├─ resolve-sources.sh   (cache → upstream → verify)
-                                     ├─ build-rpm.sh → rpm-builder container  (host-arch rpmbuild)
-                                     └─ rpm-artifactory-upload     (QSC key → token → jf rt upload)
-```
-
-- **Build** resolves the source tarball(s), builds the RPM(s) in a container, and uploads them as a GitHub build artifact.
-- **Release** runs the same build, then — behind a manual approval gate — publishes the RPMs to JFrog Artifactory and caches any upstream-fetched source tarballs back.
-
----
-
-## The `sources` / lookaside cache model
-
-Packaging repos follow the Fedora/CentOS **dist-git** model: git tracks the spec and a small `sources` file (checksum + filename); the tarball itself is **never committed** — it lives in an Artifactory lookaside cache, keyed by its checksum.
-
-`resolve-sources.sh` processes each `sources` entry:
-
-1. **Cache lookup** — compute the lookaside path under `CACHE_BASE_URL` (default `{filename}/{hashtype}/{hash}/{filename}`) and `HEAD` it.
-2. **Hit** → download from the cache. **Miss** → read the matching `SourceN:` URL from the spec and download from **upstream**.
-3. **Verify** the tarball's checksum against `sources`; a mismatch fails the build.
-4. **Cache-back** (release only) — an upstream-fetched tarball is uploaded to `<repo>/sources/...` so the next build is a cache hit.
-
----
-
-## Reusable workflow reference
-
-### `pkg-build-reusable-workflow.yml`
-
-Builds the RPM(s). Used by the PR workflow and internally by the release workflow.
-
-| Input | Req | Default | Purpose |
-|---|---|---|---|
-| `cache-base-url` | **yes** | — | Base URL of the Artifactory lookaside cache. |
-| `qcom-rpm-utils-ref` | no | `main` | Git ref of this repo to pin the tooling to. |
-| `builder-image` | no | `""` | Override the `rpm-builder` toolchain image (defaults to `ghcr.io/<owner>/rpm-builder:centos10`). |
-| `extra-repo` | no | `""` | Extra dnf repo URL for `BuildRequires` resolution. |
-| `release` | no | `false` | Cache verified upstream tarballs back to Artifactory. |
-| `cache-path-template` | no | `{filename}/{hashtype}/{hash}/{filename}` | Lookaside path layout. |
-| `target-repo` | no | `qualcomm-dnf-repo` | Artifactory repo for source cache-back. |
-
-| Secret | Req | Purpose |
-|---|---|---|
-| `QSC_API_KEY` | no | Needed only when `release: true`, to cache tarballs back. |
-
-**Outputs:** `artifact-name`, `pkg-name`, `pkg-version`.
-
-### `pkg-release-reusable-workflow.yml`
-
-Builds, then publishes to Artifactory behind the **`pkg-release-approval`** environment.
-
-| Input | Req | Default | Purpose |
-|---|---|---|---|
-| `cache-base-url` | **yes** | — | Base URL of the lookaside cache. |
-| `qcom-rpm-utils-ref` | no | `main` | Tooling ref. |
-| `server-url` | no | `https://qartifactory.qualcomm.com` | Artifactory server. |
-| `target-repo` | no | `qualcomm-dnf-repo` | Repo to publish into. |
-| `builder-image` / `extra-repo` / `cache-path-template` | no | (as build) | Forwarded to the build. |
-
-| Secret | Req | Purpose |
-|---|---|---|
-| `QSC_API_KEY` | **yes** | Exchanged for a short-lived JFrog token to publish. |
-
-**Published layout** (defaults): RPMs → `qualcomm-dnf-repo/<pkg>/<version>/…` (SRPM under `…/src/`); cached tarballs → `qualcomm-dnf-repo/sources/<filename>/<hashtype>/<hash>/<filename>`.
-
----
-
-## Authentication
-
-The `rpm-artifactory-upload` action authenticates to Artifactory by exchanging the **`QSC_API_KEY`** for a short-lived **JFrog access token** (via the QSC token endpoint), then running `jf rt upload`. The token's service account must have **Deploy + Annotate** permission on the backing local repo behind `qualcomm-dnf-repo` (e.g. `qsc-rpm-local`). No JFrog credentials are stored in the repo.
-
----
-
 ## Requirements
 
-**To call the reusable workflows:**
-- A self-hosted GitHub Actions runner with **Docker** available.
-- The workflows install the `rpm` package on the runner and pull the builder base image on demand.
-
 **To run the scripts locally:**
-- `bash` and Docker — `build-rpm.sh` runs the prebuilt `rpm-builder` container (default `ghcr.io/qualcomm-linux/rpm-builder:centos10`), so `rpmbuild` and the build toolchain come from the image, not the host. Override with `--builder-image` or `$RPM_BUILDER_IMAGE`.
+- `bash` and docker — `build-rpm.sh` runs the prebuilt `rpm-builder` container, so `rpmbuild` and the build toolchain come from the image, not the host. Override with `--builder-image` or `$RPM_BUILDER_IMAGE`.
 - `rpm`/`rpmspec` on the host if you use `resolve-sources.sh` directly.
 
 ---
@@ -120,7 +38,7 @@ Resolve sources (query cache, fall back to the spec's `SourceN:` URL, verify che
 ./scripts/resolve-sources.sh \
   --sources sources \
   --spec mypackage.spec \
-  --cache-base-url https://qartifactory.qualcomm.com/artifactory/qualcomm-dnf-repo/sources \
+  --cache-base-url https://<artifactory-host>/artifactory/<repo>/sources \
   --dest ./sources-cache
 ```
 

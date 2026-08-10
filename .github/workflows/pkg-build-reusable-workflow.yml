@@ -76,7 +76,7 @@ permissions:
 jobs:
   build:
     name: Build RPM
-    runs-on: [self-hosted, platform-prd-u2404-arm64-large-od-ephem]
+    runs-on: [self-hosted]
     outputs:
       artifact-name: ${{ steps.meta.outputs.artifact-name }}
       pkg-name: ${{ steps.meta.outputs.pkg-name }}
@@ -100,8 +100,11 @@ jobs:
       - name: Install rpm tooling
         run: |
           set -euo pipefail
+          # Only `rpmspec` is needed on the runner, to expand the spec's SourceN:
+          # URLs and query its name/version; Debian/Ubuntu ship it in `rpm`.
+          # rpmbuild itself runs inside the rpm-builder container, not here.
           sudo apt-get update -y -qq
-          sudo apt-get install -y -qq --no-install-recommends rpm rpmdevtools
+          sudo apt-get install -y -qq --no-install-recommends rpm
 
       - name: Locate spec file
         id: spec

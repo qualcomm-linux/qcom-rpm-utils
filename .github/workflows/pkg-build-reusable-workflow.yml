@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -y -qq
-          sudo apt-get install -y -qq --no-install-recommends rpm rpmdevtools
+          sudo apt-get install -y -qq --no-install-recommends rpm
 
       - name: Locate spec file
         id: spec

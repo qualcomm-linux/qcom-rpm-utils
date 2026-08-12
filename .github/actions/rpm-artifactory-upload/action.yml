@@ -8,7 +8,7 @@ inputs:
   server_url:
     description: "Artifactory server URL"
     required: false
-    default: "https://qartifactory.qualcomm.com/"
+    default: "https://qartifactory.pe.jfrog.io/"
 
   target_repo:
     description: "Target YUM/RPM repo name, optionally with a path prefix"

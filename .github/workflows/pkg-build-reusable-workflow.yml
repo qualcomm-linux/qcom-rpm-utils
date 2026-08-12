@@ -45,7 +45,7 @@ on:
         description: "Artifactory server URL used for source cache-back (release only)"
         type: string
         required: false
-        default: "https://qartifactory.qualcomm.com"
+        default: "https://qartifactory.pe.jfrog.io"
       target-repo:
         description: "Artifactory repo for source cache-back (release only)"
         type: string

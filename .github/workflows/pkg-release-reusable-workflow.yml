@@ -43,7 +43,7 @@ on:
         description: "Artifactory server URL"
         type: string
         required: false
-        default: "https://qartifactory.qualcomm.com"
+        default: "https://qartifactory.pe.jfrog.io"
       target-repo:
         description: "Artifactory YUM/RPM repo to publish to"
         type: string

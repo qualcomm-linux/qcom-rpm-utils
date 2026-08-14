@@ -73,6 +73,11 @@ permissions:
   contents: read
   packages: read
 
+env:
+  BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+  S3_BUCKET: "qli-prd-platform-gh-artifacts"
+  FILESERVER_URL: "https://qli-prod-artifacts.qualcomm.com"
+
 jobs:
   build:
     name: Build RPM
@@ -230,7 +235,28 @@ jobs:
             pkg/output/*.rpm
             pkg/output/sha256sums.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
+
+      - name: Publish RPMs to S3
+        id: upload_rpms_s3
+        uses: qualcomm-linux/upload-private-artifact-action@4940e9327cd7386acdb908b61c714c079b7d754b # aws-v4
+        with:
+          path: pkg/output
+          s3_bucket: ${{ env.S3_BUCKET }}
+          destination: qualcomm-linux/pkg/proposed/${{ env.BUILD_ID }}/
+          fileserver_url: ${{ env.FILESERVER_URL }}
+
+      - name: Print RPM download URL
+        env:
+          RPMS_URL: ${{ steps.upload_rpms_s3.outputs.url }}
+        run: |
+          set -euo pipefail
+          echo "RPMs URL: ${RPMS_URL}"
+          {
+            echo "## S3 artifacts"
+            echo ""
+            echo "- RPMs: ${RPMS_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Job summary
         if: always()

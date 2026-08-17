@@ -77,6 +77,7 @@ env:
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
   S3_BUCKET: "qli-prd-platform-gh-artifacts"
   FILESERVER_URL: "https://qli-prod-artifacts.qualcomm.com"
+  DEFAULT_CACHE_BASE_URL: "https://qartifactory.qualcomm.com/artifactory/qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0/sources"
 
 jobs:
   build:
@@ -140,8 +141,8 @@ jobs:
             exit 1
           fi
           if [[ -z "${CACHE_BASE_URL}" ]]; then
-            echo "::error::cache-base-url is empty. Set the CACHE_BASE_URL Actions variable." >&2
-            exit 1
+            echo "::warning::cache-base-url input is empty. Falling back to default: ${DEFAULT_CACHE_BASE_URL}"
+            CACHE_BASE_URL="${DEFAULT_CACHE_BASE_URL}"
           fi
           emit=""
           if [[ "${IS_RELEASE}" == "true" ]]; then

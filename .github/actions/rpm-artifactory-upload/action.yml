@@ -20,10 +20,20 @@ inputs:
     required: false
     default: "output"
 
-  target_subpath:
-    description: "Subpath under target_repo to upload RPMs into (e.g. the package name)."
+  distro:
+    description: "Distribution name; first path segment under target_repo (e.g. centos)."
     required: false
-    default: ""
+    default: "centos"
+
+  distro_version:
+    description: "Distribution major version (e.g. 10)."
+    required: false
+    default: "10"
+
+  channel:
+    description: "Release channel directory (e.g. os, nightly)."
+    required: false
+    default: "os"
 
   cache_uploads_manifest:
     description: >
@@ -197,7 +207,9 @@ runs:
       env:
         SERVER_ID: "artifactory-server"
         TARGET_REPO: ${{ inputs.target_repo }}
-        TARGET_SUBPATH: ${{ inputs.target_subpath }}
+        DISTRO: ${{ inputs.distro }}
+        DISTRO_VERSION: ${{ inputs.distro_version }}
+        CHANNEL: ${{ inputs.channel }}
         RPM_DIR: ${{ inputs.rpm_dir }}
         PROVENANCE_INFO: ${{ inputs.provenance_info }}
         MANIFEST: ${{ inputs.cache_uploads_manifest }}
@@ -225,24 +237,28 @@ runs:
           PROPS="${PROPS:+${PROPS};}${key}=${val}"
         done
 
-        TARGET_DIR="$TARGET_REPO/"
-        if [ -n "$TARGET_SUBPATH" ]; then
-          TARGET_DIR="${TARGET_REPO}/${TARGET_SUBPATH}/"
-        fi
-        echo "Upload target: $TARGET_DIR"
+        BASE_DIR="${TARGET_REPO}/${DISTRO}/${DISTRO_VERSION}/${CHANNEL}"
+        echo "Upload base: $BASE_DIR"
 
         for f in "${rpms[@]}"; do
           base="$(basename "$f")"
           arch="${base%.rpm}"; arch="${arch##*.}"
+
+          arch_dir="$arch"
+          if [ "$arch" = "src" ]; then
+            arch_dir="SRPMS"
+          fi
+
+          target_dir="${BASE_DIR}/${arch_dir}/Packages/"
           fileprops="${PROPS:+${PROPS};}rpm.arch=${arch}"
 
-          echo "Uploading $base (arch=${arch}) -> $TARGET_DIR"
+          echo "Uploading $base (arch=${arch}) -> $target_dir"
           jf rt upload \
             --server-id="$SERVER_ID" \
             --flat=true \
             --target-props "${fileprops}" \
             "$f" \
-            "$TARGET_DIR"
+            "$target_dir"
         done
 
     - name: Cache back source tarballs

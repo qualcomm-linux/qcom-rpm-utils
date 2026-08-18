@@ -45,17 +45,26 @@ on:
         required: false
         default: "https://qartifactory.pe.jfrog.io"
       target-repo:
-        description: "Artifactory YUM/RPM repo to publish to"
-        type: string
-        required: false
-        default: "qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0"
-      target-subpath:
         description: >
-          Subpath under target-repo to publish RPMs into. All RPMs are dumped
-          flat here.
+          Artifactory YUM/RPM repo to publish to.
         type: string
         required: false
-        default: "10-stream/BaseOS/Packages"
+        default: "qsc-rpm-releases-stage"
+      distro:
+        description: "Distribution name; first path segment under target-repo"
+        type: string
+        required: false
+        default: "centos"
+      distro-version:
+        description: "Distribution major version"
+        type: string
+        required: false
+        default: "10"
+      channel:
+        description: "Release channel directory (os, nightly)"
+        type: string
+        required: false
+        default: "os"
     secrets:
       QSC_API_KEY:
         description: "QSC API key used to obtain an Artifactory access token. Takes precedence over ARTIFACTORY_ACCESS_TOKEN when both are set."
@@ -151,7 +160,9 @@ jobs:
         with:
           server_url: ${{ inputs.server-url }}
           target_repo: ${{ inputs.target-repo }}
-          target_subpath: ${{ inputs.target-subpath }}
+          distro: ${{ inputs.distro }}
+          distro_version: ${{ inputs.distro-version }}
+          channel: ${{ inputs.channel }}
           rpm_dir: output
           provenance_info: ${{ steps.prov.outputs.provenance }}
           qsc_api_key: ${{ secrets.QSC_API_KEY }}
@@ -163,11 +174,16 @@ jobs:
           PKG_NAME: ${{ needs.build.outputs.pkg-name }}
           PKG_VERSION: ${{ needs.build.outputs.pkg-version }}
           TARGET_REPO: ${{ inputs.target-repo }}
+          DISTRO: ${{ inputs.distro }}
+          DISTRO_VERSION: ${{ inputs.distro-version }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
+          base="${TARGET_REPO}/${DISTRO}/${DISTRO_VERSION}/${CHANNEL}"
           {
             echo "## Published RPMs"
             echo ""
             echo "- Package: \`${PKG_NAME}-${PKG_VERSION}\`"
-            echo "- Repo:    \`${TARGET_REPO}\`"
+            echo "- Binary RPMs: \`${base}/<arch>/Packages/\`"
+            echo "- Source RPMs: \`${base}/SRPMS/Packages/\`"
           } >> "$GITHUB_STEP_SUMMARY"

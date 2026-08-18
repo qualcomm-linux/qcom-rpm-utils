@@ -80,34 +80,37 @@ Build then publish to Artifactory. The `publish` job runs in the
 before anything is uploaded.
 
 **Key inputs:** `qcom-rpm-utils-ref`, `cache-base-url` (**required**),
-`server-url`, `target-repo` (default `qsc-rpm-releases-stage`), `target-subpath`
-(default `10-stream/BaseOS/Packages`). **Secrets:** `ARTIFACTORY_ACCESS_TOKEN`
-and/or `QSC_API_KEY` (**at least one required** — see
-[Authentication](#authentication)).
+`server-url`, `target-repo` (default `qsc-rpm-releases-stage`), `distro`
+(default `centos`), `distro-version` (default `10`), `channel` (default `os`).
+**Secrets:** `ARTIFACTORY_ACCESS_TOKEN` and/or `QSC_API_KEY` (**at least one
+required** — see [Authentication](#authentication)).
 
-`target-repo` is a repo name *plus* any path prefix under it. Artifactory grants
-are often scoped to a product subtree rather than a whole repo — e.g.
-`qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0` — so
-callers pass that prefix here. Both the RPM upload and the source cache-back
-derive their target from `target-repo`, so setting it once keeps both inside the
-permitted subtree; an upload outside it is rejected with `403`. Keep
-`cache-base-url` pointed at the matching `<target-repo>/sources`, or cache reads
-will never match cache-back writes.
+`target-repo` is a repo name *plus* any path prefix under it, and it is the root
+that **both** the RPM upload and the source cache-back derive from — source
+tarballs are cached back to `<target-repo>/sources/`. Setting it once keeps both
+writes inside the same Artifactory subtree; an upload outside a permitted subtree
+is rejected with `403`. Keep `cache-base-url` pointed at the matching
+`<target-repo>/sources`, or cache reads will never match cache-back writes.
 
-All built RPMs are uploaded flat into `<target-repo>/<target-subpath>/`. Binary
-and source RPMs alike are dumped directly into that directory — no `src/` or
-`output/` subfolders. The YUM `repodata/` is **not** uploaded by the workflow —
-Artifactory's YUM indexer calculates it. Set the repo's **YUM Metadata Folder
-Depth** (`yumRootDepth`) to the number of path segments above `Packages/` so the
-metadata lands beside it rather than at the repo root:
+RPMs are published into a standard YUM tree, split by architecture:
 
-| `<target-repo>` / `<target-subpath>` | Depth | `repodata/` written to |
-|---|---|---|
-| `<repo>` / `10-stream/BaseOS/Packages` | `2` | `<repo>/10-stream/BaseOS/repodata/` |
-| `<repo>/product/chip/software-product/<PRODUCT>/<version>` / `10-stream/BaseOS/Packages` | `7` | `…/<version>/10-stream/BaseOS/repodata/` |
+```
+<target-repo>/<distro>/<distro-version>/<channel>/
+├── aarch64/Packages/     <- binary RPMs
+├── noarch/Packages/
+├── x86_64/Packages/
+└── SRPMS/Packages/       <- source RPMs (*.src.rpm)
+```
 
-`yumRootDepth` is a single repo-wide setting, so every product tree in a repo
-must publish at the same nesting level.
+With the defaults that is `<repo>/centos/10/os/<arch>/Packages/`. Architecture is
+read from each filename, and `*.src.rpm` is routed to `SRPMS/` rather than an
+`src/` directory.
+
+
+`yumRootDepth` is a single repo-wide setting, so every tree in the repo must
+publish at the same nesting level. The layout above is deliberately uniform —
+`SRPMS/` sits at the same depth as the arch directories, so one depth value
+indexes both.
 
 Caller example:
 

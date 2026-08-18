@@ -77,7 +77,7 @@ env:
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
   S3_BUCKET: "qli-prd-platform-gh-artifacts"
   FILESERVER_URL: "https://qli-prod-artifacts.qualcomm.com"
-  DEFAULT_CACHE_BASE_URL: "https://qartifactory.qualcomm.com/artifactory/qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0/sources"
+  DEFAULT_CACHE_BASE_URL: "https://qartifactory.pe.jfrog.io/artifactory/qsc-rpm-releases-stage/sources"
 
 jobs:
   build:

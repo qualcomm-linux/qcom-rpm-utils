@@ -78,6 +78,7 @@ env:
   S3_BUCKET: "qli-prd-platform-gh-artifacts"
   FILESERVER_URL: "https://qli-prod-artifacts.qualcomm.com"
   DEFAULT_CACHE_BASE_URL: "https://qartifactory.pe.jfrog.io/artifactory/qsc-rpm-releases-stage/sources"
+  DEFAULT_EXTRA_REPO: "https://qartifactory.qualcomm.com/artifactory/qsc-rpm-releases-stage/product/chip/software-product/QCM6490.LRH/0.0.0.0/10-stream/BaseOS/Packages"
 
 jobs:
   build:
@@ -165,7 +166,7 @@ jobs:
           rpm_dir: pkg/sources-cache
           cache_uploads_manifest: pkg/sources-cache/.cache-uploads
           qsc_api_key: ${{ secrets.QSC_API_KEY }}
-          access_token: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
+          access_token: ${{ secrets.RPM_ARTIFACTORY_ACCESS_TOKEN }}
 
       - name: Log in to GHCR (pull rpm-builder image)
         uses: docker/login-action@v4
@@ -182,6 +183,7 @@ jobs:
           TARBALL: ${{ steps.sources.outputs.tarball }}
           SPEC_FILE: ${{ steps.spec.outputs.spec }}
           EXTRA_REPO: ${{ inputs.extra-repo }}
+          ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           chmod +x ../qcom-rpm-utils/scripts/build-rpm.sh
@@ -194,6 +196,13 @@ jobs:
                 --spec "${SPEC_FILE}"
                 --output ./output
                 --builder-image "${builder_image}")
+          if [[ -z "${EXTRA_REPO}" ]]; then
+            echo "::warning::extra-repo input is empty. Falling back to default: ${DEFAULT_EXTRA_REPO}"
+            EXTRA_REPO="${DEFAULT_EXTRA_REPO}"
+            if [[ -n "${ARTIFACTORY_ACCESS_TOKEN}" ]]; then
+              EXTRA_REPO="https://:${ARTIFACTORY_ACCESS_TOKEN}@${EXTRA_REPO#https://}"
+            fi
+          fi
           if [[ -n "${EXTRA_REPO}" ]]; then
             args+=(--extra-repo "${EXTRA_REPO}")
           fi

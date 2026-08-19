@@ -118,6 +118,11 @@ cp "${SPEC_ABS}"    "${WORKSPACE}/"
 TARBALL_BASE="$(basename "${TARBALL_ABS}")"
 SPEC_BASE="$(basename "${SPEC_ABS}")"
 
+SPEC_DIR="$(dirname "${SPEC_ABS}")"
+for patch in "${SPEC_DIR}"/*.patch; do
+    [[ -f "${patch}" ]] && cp "${patch}" "${WORKSPACE}/"
+done
+
 CONTAINER_EXTRA_RPMS=""
 if [[ -n "${EXTRA_RPMS}" ]]; then
     for rpm in ${EXTRA_RPMS}; do

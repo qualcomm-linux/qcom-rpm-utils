@@ -49,6 +49,7 @@ rpmdev-setuptree
 
 cp "${WORKSPACE}/${TARBALL}"   /root/rpmbuild/SOURCES/
 cp "${WORKSPACE}/${SPEC_FILE}" /root/rpmbuild/SPECS/
+cp "${WORKSPACE}"/*.patch /root/rpmbuild/SOURCES/ 2>/dev/null || true
 
 if [[ -n "${EXTRA_REPO_DIR}" ]]; then
     echo "Registering extra dnf repo: ${EXTRA_REPO_DIR}"

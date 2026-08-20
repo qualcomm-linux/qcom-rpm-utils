@@ -119,8 +119,8 @@ TARBALL_BASE="$(basename "${TARBALL_ABS}")"
 SPEC_BASE="$(basename "${SPEC_ABS}")"
 
 SPEC_DIR="$(dirname "${SPEC_ABS}")"
-for patch in "${SPEC_DIR}"/*.patch; do
-    [[ -f "${patch}" ]] && cp "${patch}" "${WORKSPACE}/"
+for src_files in "${SPEC_DIR}"/*; do
+    [[ -f "${src_files}" ]] && cp "${src_files}" "${WORKSPACE}/"
 done
 
 CONTAINER_EXTRA_RPMS=""

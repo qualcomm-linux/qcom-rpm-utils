@@ -47,9 +47,27 @@ fi
 
 rpmdev-setuptree
 
-cp "${WORKSPACE}/${TARBALL}"   /root/rpmbuild/SOURCES/
+spec_base="$(basename "${SPEC_FILE}")"
+
 cp "${WORKSPACE}/${SPEC_FILE}" /root/rpmbuild/SPECS/
-cp "${WORKSPACE}"/*.patch /root/rpmbuild/SOURCES/ 2>/dev/null || true
+
+echo "=== Staging Sources and Patches ==="
+rpmspec -P "/root/rpmbuild/SPECS/${spec_base}" \
+    | grep -E '^(Source|Patch)[0-9]*[[:space:]]*:' \
+    | sed 's/^[^:]*:[[:space:]]*//' \
+    | while read -r entry; do
+        [[ -z "${entry}" || "${entry}" =~ ^(https?|ftp):// ]] && continue
+        filename="$(basename "${entry}")"
+        if [[ -f "${WORKSPACE}/${filename}" ]]; then
+            cp -v "${WORKSPACE}/${filename}" /root/rpmbuild/SOURCES/
+        else
+            echo "WARN: missing source/patch: ${filename}" >&2
+        fi
+    done
+
+spectool --get-files --all \
+    --directory /root/rpmbuild/SOURCES/ \
+    "/root/rpmbuild/SPECS/${spec_base}"
 
 if [[ -n "${EXTRA_REPO_DIR}" ]]; then
     echo "Registering extra dnf repo: ${EXTRA_REPO_DIR}"
@@ -68,7 +86,6 @@ if [[ -n "${EXTRA_RPMS}" ]]; then
     dnf install -y "${rpm_paths[@]}"
 fi
 
-spec_base="$(basename "${SPEC_FILE}")"
 dnf builddep -y "/root/rpmbuild/SPECS/${spec_base}"
 
 eval rpmbuild -ba ${RPM_MACROS} "/root/rpmbuild/SPECS/${spec_base}"

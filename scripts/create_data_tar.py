@@ -43,7 +43,6 @@ logger = logging.getLogger("create_data_tar")
 
 DEFAULT_BUILDER_IMAGE = "ghcr.io/qualcomm-linux/rpm-builder:centos10"
 ARTIFACTORY_SEARCH_API = "https://qartifactory-edge.qualcomm.com/artifactory/api/search/artifact"
-DOC_DIR_NAMES = ("usr/share/doc", "usr/share/man")
 
 
 def parse_arguments():
@@ -220,23 +219,24 @@ def collect_binary_rpms_for_srpm(srpm_path: str, work_dir: str):
     return matches
 
 
-def extract_rpms_to_stage(rpm_paths, stage_dir) -> bool:
+def extract_rpms_to_stage(rpm_paths, stage_dir) -> None:
     """
     For each rpm in rpm_paths, extract its raw payload with
     `rpm2cpio | cpio -idm` directly into stage_dir, merging all rpms'
     contents together (they don't own overlapping paths, since they're
     subpackages of the same build).
-    Returns True if at least one rpm was extracted successfully.
+    All rpm_paths belong to the same build (matched by version-release), so
+    a missing file or a failed extraction means the resulting tarball would
+    be silently incomplete; raises RuntimeError immediately in either case
+    rather than proceeding with a partial result.
     """
     if os.path.isdir(stage_dir):
         shutil.rmtree(stage_dir)
     os.makedirs(stage_dir)
 
-    extracted_any = False
     for rpm_path in rpm_paths:
         if not os.path.exists(rpm_path):
-            logger.warning(f"Referenced .rpm not found: {rpm_path} (skipping)")
-            continue
+            raise RuntimeError(f"Referenced .rpm not found: {rpm_path}")
 
         try:
             rpm2cpio = subprocess.Popen(['rpm2cpio', rpm_path], stdout=subprocess.PIPE)
@@ -248,40 +248,8 @@ def extract_rpms_to_stage(rpm_paths, stage_dir) -> bool:
             rpm2cpio.wait()
             if rpm2cpio.returncode != 0:
                 raise subprocess.CalledProcessError(rpm2cpio.returncode, 'rpm2cpio')
-            extracted_any = True
         except subprocess.CalledProcessError as e:
-            logger.error(f"Extraction failed for {rpm_path}: {e}")
-
-    if not extracted_any:
-        logger.error("No .rpm files were successfully extracted.")
-        return False
-    return True
-
-
-def strip_doc_dirs(stage_dir: str) -> None:
-    """
-    Remove common documentation directories (usr/share/doc, usr/share/man)
-    from the staged content before archiving.
-    """
-    for doc_rel in DOC_DIR_NAMES:
-        doc_path = os.path.join(stage_dir, doc_rel)
-        if os.path.isdir(doc_path):
-            shutil.rmtree(doc_path)
-
-
-def gather_notice_and_license(stage_dir: str) -> None:
-    """
-    NOTICE / LICENSE.qcom-2 ship inside the binary rpms themselves at their
-    root, so they land at stage_dir's root during extraction; this just logs
-    whether they were found so create_tar_of_stage's normal top-level walk
-    picks them up along with everything else.
-    """
-    for filename in ('NOTICE', 'LICENSE.qcom-2'):
-        path = os.path.join(stage_dir, filename)
-        if os.path.isfile(path):
-            logger.info(f"Including {filename} from the rpm payload in the tarball.")
-        else:
-            logger.warning(f"No {filename} found in the extracted rpm payload; skipping.")
+            raise RuntimeError(f"Extraction failed for {rpm_path}: {e}") from e
 
 
 def create_tar_of_stage(stage_dir: str, tar_path: str, top_dir: str) -> str:
@@ -446,13 +414,12 @@ def main():
         logger.critical(str(e))
         sys.exit(1)
 
-    ok = extract_rpms_to_stage(rpm_paths, stage_dir)
-    if not ok:
+    try:
+        extract_rpms_to_stage(rpm_paths, stage_dir)
+    except RuntimeError as e:
+        logger.critical(str(e))
         shutil.rmtree(stage_dir, ignore_errors=True)
         sys.exit(1)
-
-    gather_notice_and_license(stage_dir)
-    strip_doc_dirs(stage_dir)
 
     try:
         if args.output_tar:

@@ -112,6 +112,10 @@ render_cache_path() {
     printf '%s' "${rel}"
 }
 
+redact_url() {
+    printf '%s' "$1" | sed -E 's#(://)[^/@]*@#\1***@#'
+}
+
 spec_source_url_for() {
     local want="$1"
     local lister=""
@@ -174,13 +178,13 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     echo "::group::Resolving ${filename}"
     if curl -fsI --retry 3 "${url}" >/dev/null 2>&1; then
-        echo "Cache HIT: ${url}"
+        echo "Cache HIT: $(redact_url "${url}")"
         if ! curl -fsSL --retry 3 -o "${dest}" "${url}"; then
-            echo "ERROR: Failed to download ${filename} from the cache: ${url}" >&2
+            echo "ERROR: Failed to download ${filename} from the cache: $(redact_url "${url}")" >&2
             exit 1
         fi
     else
-        echo "Cache MISS: ${url}"
+        echo "Cache MISS: $(redact_url "${url}")"
         echo "Resolving upstream URL from the spec's SourceN: directives..."
         upstream="$(spec_source_url_for "${filename}")"
         if [[ -z "${upstream}" ]]; then

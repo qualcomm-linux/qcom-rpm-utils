@@ -20,7 +20,7 @@
 #   SPEC_FILE    basename of the spec file under /workspace
 #   RPM_MACROS   extra `rpmbuild --define` string (optional)
 #   EXTRA_RPMS   space-separated local RPM paths under /workspace (optional)
-#   EXTRA_REPO_DIR  http(s) dnf repo URL to register (optional)
+#   EXTRA_REPO_DIR  space-separated list of http(s) dnf repo URLs to register (optional)
 #   HOST_UID/HOST_GID  uid:gid to chown ./output to on exit, so the caller can
 #                   clean up its bind-mounted workspace (optional)
 #
@@ -67,9 +67,13 @@ rpmspec -P "/root/rpmbuild/SPECS/${spec_base}" \
 
 
 if [[ -n "${EXTRA_REPO_DIR}" ]]; then
-    echo "Registering extra dnf repo: ${EXTRA_REPO_DIR}"
-    printf '[extra-repo]\nname=Extra RPM Repository\nbaseurl=%s\nenabled=1\ngpgcheck=0\nskip_if_unavailable=1\npriority=1\n' \
-        "${EXTRA_REPO_DIR}" > /etc/yum.repos.d/extra-repo.repo
+    idx=0
+    for repo in ${EXTRA_REPO_DIR}; do
+        echo "Registering extra dnf repo: ${repo}"
+        printf '[extra-repo-%d]\nname=Extra RPM Repository %d\nbaseurl=%s\nenabled=1\ngpgcheck=0\nskip_if_unavailable=1\npriority=1\n' \
+            "${idx}" "${idx}" "${repo}" > "/etc/yum.repos.d/extra-repo-${idx}.repo"
+        idx=$((idx + 1))
+    done
     dnf clean metadata
 fi
 

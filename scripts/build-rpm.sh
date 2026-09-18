@@ -27,7 +27,9 @@
 #       --extra-repo <url>    URL of an existing dnf repository (e.g. Artifactory)
 #                             to register inside the build container. Packages
 #                             from this repo are available to satisfy
-#                             BuildRequires (via dnf builddep).
+#                             BuildRequires (via dnf builddep). May be passed
+#                             multiple times, and/or given a space-separated
+#                             list of URLs, to register several repositories.
 #   -h, --help                Show this help
 #
 # Examples:
@@ -47,6 +49,11 @@
 #   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec \
 #                  --extra-repo https://artifactory.example.com/artifactory/my-rpm-repo/
 #
+#   # Register multiple extra dnf repositories
+#   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec \
+#                  --extra-repo https://artifactory.example.com/artifactory/repo-a/ \
+#                  --extra-repo https://artifactory.example.com/artifactory/repo-b/
+#
 #   # Override the toolchain image
 #   RPM_BUILDER_IMAGE=ghcr.io/myorg/rpm-builder:centos10 \
 #     ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec
@@ -59,7 +66,7 @@ SPEC_FILE=""
 OUTPUT_DIR="./output"
 RPM_MACROS=""
 EXTRA_RPMS=""
-EXTRA_REPO_DIR=""
+EXTRA_REPOS=""
 BUILDER_IMAGE="${RPM_BUILDER_IMAGE:-ghcr.io/qualcomm-linux/rpm-builder:centos10}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -76,7 +83,7 @@ while [[ $# -gt 0 ]]; do
         -o|--output)        OUTPUT_DIR="$2";     shift 2 ;;
         --macros)           RPM_MACROS="$2";     shift 2 ;;
         --extra-rpms)       EXTRA_RPMS="$2";     shift 2 ;;
-        --extra-repo)       EXTRA_REPO_DIR="$2"; shift 2 ;;
+        --extra-repo)       EXTRA_REPOS="${EXTRA_REPOS:+${EXTRA_REPOS} }$2"; shift 2 ;;
         --builder-image)    BUILDER_IMAGE="$2";  shift 2 ;;
         -h|--help)          usage ;;
         *) echo "ERROR: Unknown option: $1" >&2; exit 1 ;;
@@ -96,8 +103,12 @@ fi
 if [[ ! -f "${SPEC_FILE}" ]]; then
     echo "ERROR: Spec file not found: ${SPEC_FILE}" >&2; exit 1
 fi
-if [[ -n "${EXTRA_REPO_DIR}" && ! "${EXTRA_REPO_DIR}" =~ ^https?:// ]]; then
-    echo "ERROR: --extra-repo must be an HTTP/HTTPS URL." >&2; exit 1
+if [[ -n "${EXTRA_REPOS}" ]]; then
+    for repo in ${EXTRA_REPOS}; do
+        if [[ ! "${repo}" =~ ^https?:// ]]; then
+            echo "ERROR: --extra-repo must be an HTTP/HTTPS URL: ${repo}" >&2; exit 1
+        fi
+    done
 fi
 if ! command -v docker >/dev/null 2>&1; then
     echo "ERROR: docker not found in PATH." >&2; exit 1
@@ -145,7 +156,7 @@ echo " Output    : ${OUTPUT_ABS}"
 echo " Image     : ${BUILDER_IMAGE}"
 [[ -n "${RPM_MACROS}" ]]           && echo " Macros    : ${RPM_MACROS}"
 [[ -n "${CONTAINER_EXTRA_RPMS}" ]] && echo " Extra RPMs: ${CONTAINER_EXTRA_RPMS}"
-[[ -n "${EXTRA_REPO_DIR}" ]]       && echo " Extra repo: ${EXTRA_REPO_DIR}"
+[[ -n "${EXTRA_REPOS}" ]]          && echo " Extra repos: ${EXTRA_REPOS}"
 echo "============================================================"
 echo ""
 
@@ -159,7 +170,7 @@ docker run --rm \
     -e "SPEC_FILE=${SPEC_BASE}" \
     -e "RPM_MACROS=${RPM_MACROS}" \
     -e "EXTRA_RPMS=${CONTAINER_EXTRA_RPMS}" \
-    -e "EXTRA_REPO_DIR=${EXTRA_REPO_DIR}" \
+    -e "EXTRA_REPO_DIR=${EXTRA_REPOS}" \
     -e "HOST_UID=$(id -u)" \
     -e "HOST_GID=$(id -g)" \
     "${BUILDER_IMAGE}" \

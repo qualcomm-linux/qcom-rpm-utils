@@ -32,7 +32,7 @@ on:
         required: false
         default: ""
       extra-repo:
-        description: "Extra dnf repo URL to register for BuildRequires resolution"
+        description: "Extra dnf repo URL(s) to register for BuildRequires resolution (space-separated for multiple)"
         type: string
         required: false
         default: ""

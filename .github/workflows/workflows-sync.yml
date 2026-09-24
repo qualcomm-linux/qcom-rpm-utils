@@ -74,12 +74,22 @@ jobs:
         run: |
           EXCLUDE_REPOS=()
 
-          # Source-of-truth workflows, checked out under
-          # qcom-rpm-utils/.github/pkg-rpm-workflows/. Each immediate subdir is
-          # named after the target branch it is synced to (e.g. c10s/).
+          # Source-of-truth trees, checked out under qcom-rpm-utils/.github/.
+          # Each immediate subdir is named after the target branch it is
+          # synced to (e.g. c10s/, main/):
+          #   pkg-rpm-workflows/<branch>/*.yml
+          #   pkg-rpm-files/<branch>/**
           SRC_ROOT="$(pwd)/qcom-rpm-utils/.github/pkg-rpm-workflows"
+          FILES_ROOT="$(pwd)/qcom-rpm-utils/.github/pkg-rpm-files"
 
-          COMMIT_MSG="chore: sync workflows from qcom-rpm-utils"
+          # Union of target branches across both trees.
+          mapfile -t TARGET_BRANCHES < <(
+            for d in "$SRC_ROOT"/*/ "$FILES_ROOT"/*/; do
+              [[ -d "$d" ]] && basename "$d"
+            done | sort -u
+          )
+
+          COMMIT_MSG="chore: sync workflows and common files from qcom-rpm-utils"
 
           # Arrays to store created PR URLs and non-fatal sync warnings.
           PR_URLS=()
@@ -94,6 +104,22 @@ jobs:
             local warning="$1"
             WARNINGS+=("$warning")
             echo "    ⚠️ $warning"
+          }
+
+          sync_file() {
+            local src="$1" dst="$2" branch="$3"
+            if [[ -f "$dst" ]] && diff -q "$src" "$dst" > /dev/null; then
+              echo "    ✅ [$branch] $dst is up to date"
+              return 0
+            fi
+            if [[ -f "$dst" ]]; then
+              echo "    ❌ [$branch] $dst differs from qcom-rpm-utils"
+            else
+              echo "    + [$branch] Creating $dst"
+            fi
+            mkdir -p "$(dirname "$dst")"
+            cp "$src" "$dst"
+            isDirty=true
           }
 
           create_or_reuse_pr() {
@@ -191,9 +217,7 @@ jobs:
             git config user.name "$BOT_NAME"
             git config user.email "$BOT_EMAIL"
 
-            for branch_dir in "$SRC_ROOT"/*/; do
-              [[ -d "$branch_dir" ]] || continue
-              target_branch="$(basename "$branch_dir")"
+            for target_branch in "${TARGET_BRANCHES[@]}"; do
               sync_branch="sync/qcom-rpm-utils-workflows-${target_branch}"
 
               # Skip repos that don't have this branch.
@@ -209,26 +233,18 @@ jobs:
 
               # Compare and sync this branch's workflow files.
               isDirty=false
-              for workflow in "$branch_dir"*.yml; do
+              for workflow in "$SRC_ROOT/$target_branch/"*.yml; do
                 [[ -e "$workflow" ]] || continue
-                workflow_name=$(basename "$workflow")
-                target_workflow=".github/workflows/$workflow_name"
-
-                if [[ -f "$target_workflow" ]]; then
-                  if diff -q "$workflow" "$target_workflow" > /dev/null; then
-                    echo "    ✅ [$target_branch] $workflow_name is up to date"
-                  else
-                    echo "    ❌ [$target_branch] $workflow_name differs from qcom-rpm-utils"
-                    cp "$workflow" "$target_workflow"
-                    isDirty=true
-                  fi
-                else
-                  echo "    + [$target_branch] Creating $workflow_name (missing from $repo)"
-                  mkdir -p ".github/workflows"
-                  cp "$workflow" "$target_workflow"
-                  isDirty=true
-                fi
+                sync_file "$workflow" ".github/workflows/$(basename "$workflow")" "$target_branch"
               done
+
+              # Compare and sync this branch's common files (LICENSE etc.),
+              # preserving their path relative to the branch dir.
+              if [[ -d "$FILES_ROOT/$target_branch" ]]; then
+                while IFS= read -r -d '' src; do
+                  sync_file "$src" "${src#"$FILES_ROOT/$target_branch/"}" "$target_branch"
+                done < <(find "$FILES_ROOT/$target_branch" -type f -print0)
+              fi
 
               if [[ "$isDirty" != "true" ]]; then
                 echo "    ✨ [$target_branch] No changes needed for $repo"
@@ -240,7 +256,7 @@ jobs:
                 record_warning "$repo:$target_branch failed to create sync branch"
                 continue
               fi
-              git add -A .github/
+              git add -A .
               if ! run_cmd git commit -s -m "$COMMIT_MSG"; then
                 record_warning "$repo:$target_branch failed to commit sync"
                 continue
@@ -253,7 +269,7 @@ jobs:
                   create_or_reuse_pr \
                     "$repo" \
                     "$COMMIT_MSG" \
-                    "This PR syncs the latest workflows from qcom-rpm-utils \`.github/pkg-rpm-workflows/${target_branch}/\`." \
+                    "This PR syncs the latest workflows and common files from qcom-rpm-utils \`.github/pkg-rpm-workflows/${target_branch}/\` and \`.github/pkg-rpm-files/${target_branch}/\`." \
                     "$sync_branch" \
                     "$target_branch" || true
                 else

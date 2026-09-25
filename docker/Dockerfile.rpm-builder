@@ -76,9 +76,26 @@ RUN dnf -y install --allowerasing \
 # Qualcomm public RPM repo. RPMs are unsigned (gpgcheck=0), but repomd.xml is
 # signed, so repo_gpgcheck=1 verifies the metadata
 COPY keyrings/qsc-rpm-releases.asc /etc/pki/rpm-gpg/RPM-GPG-KEY-qsc-rpm-releases
-ARG QCOM_RPM_REPO_URL=https://softwarecenter.qualcomm.com/nexus/rpm/centos/10/os/\$basearch
-RUN printf '[qcom-rpm-releases]\nname=Qualcomm RPM Releases\nbaseurl=%s\nenabled=1\ngpgcheck=0\nrepo_gpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-qsc-rpm-releases\nskip_if_unavailable=1\n' \
-        "${QCOM_RPM_REPO_URL}" > /etc/yum.repos.d/qcom-rpm-releases.repo
+ARG QCOM_RPM_BASE_URL=https://softwarecenter.qualcomm.com/nexus/rpm/centos/10/os
+RUN cat > /etc/yum.repos.d/qcom-rpm-releases.repo <<EOF
+[qcom-rpm-releases]
+name=Qualcomm RPM Releases
+baseurl=${QCOM_RPM_BASE_URL}/\$basearch
+enabled=1
+gpgcheck=0
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-qsc-rpm-releases
+skip_if_unavailable=1
+
+[qcom-rpm-releases-noarch]
+name=Qualcomm RPM Releases (noarch)
+baseurl=${QCOM_RPM_BASE_URL}/noarch
+enabled=1
+gpgcheck=0
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-qsc-rpm-releases
+skip_if_unavailable=1
+EOF
 
 WORKDIR /workspace
 CMD ["bash"]

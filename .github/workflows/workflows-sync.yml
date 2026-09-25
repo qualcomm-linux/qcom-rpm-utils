@@ -60,7 +60,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
-          owner: qualcomm-linux
+          owner: qualcomm-linux # zizmor: ignore[github-app]
 
       - name: Sync workflows from qcom-rpm-utils
         id: sync

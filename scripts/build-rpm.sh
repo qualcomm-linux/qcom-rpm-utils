@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # =============================================================================
 # Usage:
-#   ./build-rpm.sh --tarball <path> --spec <path> [OPTIONS]
+#   ./build-rpm.sh --tarball <path> [<path> ...] --spec <path> [OPTIONS]
 #
 # Builds RPM + SRPM packages by running the prebuilt `rpm-builder` toolchain
 # container (ghcr.io/<owner>/rpm-builder:centos10) over a bind-mounted
@@ -13,7 +13,8 @@
 # scripts/build-in-container.sh, which runs inside the container.
 #
 # Options:
-#   -t, --tarball  <file>     Source tarball (required)
+#   -t, --tarball  <files>    Source tarball(s), space-separated (required;
+#                             may also be repeated)
 #   -s, --spec     <file>     RPM spec file  (required)
 #   -o, --output   <dir>      Output directory (default: ./output)
 #       --macros   <string>   Extra rpmbuild --define strings
@@ -35,6 +36,10 @@
 # Examples:
 #   # Basic build
 #   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec
+#
+#   # Build with multiple source tarballs
+#   ./build-rpm.sh --tarball mypackage-1.0.tar.gz vendor-assets-1.0.tar.gz \
+#                  --spec mypackage.spec
 #
 #   # Custom output directory and extra macros
 #   ./build-rpm.sh --tarball mypackage-1.0.tar.gz --spec mypackage.spec \
@@ -61,7 +66,7 @@
 set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-TARBALL=""
+TARBALLS=()
 SPEC_FILE=""
 OUTPUT_DIR="./output"
 RPM_MACROS=""
@@ -78,7 +83,18 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -t|--tarball)       TARBALL="$2";        shift 2 ;;
+        -t|--tarball)
+            shift
+            if [[ $# -eq 0 || "$1" == -* ]]; then
+                echo "ERROR: --tarball requires at least one file." >&2; exit 1
+            fi
+            while [[ $# -gt 0 && "$1" != -* ]]; do
+                for tarball in $1; do
+                    TARBALLS+=("${tarball}")
+                done
+                shift
+            done
+            ;;
         -s|--spec)          SPEC_FILE="$2";      shift 2 ;;
         -o|--output)        OUTPUT_DIR="$2";     shift 2 ;;
         --macros)           RPM_MACROS="$2";     shift 2 ;;
@@ -91,15 +107,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate inputs ────────────────────────────────────────────────────────────
-if [[ -z "${TARBALL}" ]]; then
+if [[ "${#TARBALLS[@]}" -eq 0 ]]; then
     echo "ERROR: --tarball is required." >&2; exit 1
 fi
 if [[ -z "${SPEC_FILE}" ]]; then
     echo "ERROR: --spec is required." >&2; exit 1
 fi
-if [[ ! -f "${TARBALL}" ]]; then
-    echo "ERROR: Tarball not found: ${TARBALL}" >&2; exit 1
-fi
+for tarball in "${TARBALLS[@]}"; do
+    if [[ ! -f "${tarball}" ]]; then
+        echo "ERROR: Tarball not found: ${tarball}" >&2; exit 1
+    fi
+done
 if [[ ! -f "${SPEC_FILE}" ]]; then
     echo "ERROR: Spec file not found: ${SPEC_FILE}" >&2; exit 1
 fi
@@ -115,7 +133,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # ── Build a self-contained workspace ────────────────────────────────────────────
-TARBALL_ABS="$(realpath "${TARBALL}")"
+TARBALL_BASES=()
 SPEC_ABS="$(realpath "${SPEC_FILE}")"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_ABS="$(realpath "${OUTPUT_DIR}")"
@@ -124,9 +142,12 @@ WORKSPACE="$(mktemp -d)"
 cleanup() { rm -rf "${WORKSPACE}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-cp "${TARBALL_ABS}" "${WORKSPACE}/"
+for tarball in "${TARBALLS[@]}"; do
+    tarball_abs="$(realpath "${tarball}")"
+    cp "${tarball_abs}" "${WORKSPACE}/"
+    TARBALL_BASES+=("$(basename "${tarball_abs}")")
+done
 cp "${SPEC_ABS}"    "${WORKSPACE}/"
-TARBALL_BASE="$(basename "${TARBALL_ABS}")"
 SPEC_BASE="$(basename "${SPEC_ABS}")"
 
 SPEC_DIR="$(dirname "${SPEC_ABS}")"
@@ -150,7 +171,7 @@ echo ""
 echo "============================================================"
 echo " RPM Builder (container)"
 echo "============================================================"
-echo " Tarball   : ${TARBALL_BASE}"
+echo " Tarballs  : ${TARBALL_BASES[*]}"
 echo " Spec file : ${SPEC_BASE}"
 echo " Output    : ${OUTPUT_ABS}"
 echo " Image     : ${BUILDER_IMAGE}"
@@ -166,7 +187,7 @@ docker pull "${BUILDER_IMAGE}" || echo "WARN: could not pull ${BUILDER_IMAGE}; u
 docker run --rm \
     -v "${WORKSPACE}:/workspace" \
     -v "${SCRIPT_DIR}/build-in-container.sh:/usr/local/bin/build-in-container.sh:ro" \
-    -e "TARBALL=${TARBALL_BASE}" \
+    -e "TARBALLS=${TARBALL_BASES[*]}" \
     -e "SPEC_FILE=${SPEC_BASE}" \
     -e "RPM_MACROS=${RPM_MACROS}" \
     -e "EXTRA_RPMS=${CONTAINER_EXTRA_RPMS}" \

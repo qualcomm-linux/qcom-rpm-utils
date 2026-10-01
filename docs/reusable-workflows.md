@@ -9,8 +9,9 @@ for RPM packaging repositories created from
 [`pkg-rpm-template`](https://github.com/qualcomm-linux/pkg-rpm-template).
 
 A packaging repo (`pkg-rpm-*`) holds **one `*.spec` file** and a dist-git
-**`sources`** pointer file at its root; the source tarball is *not* committed.
-These workflows turn that into built (and, on release, published) RPMs.
+**`sources`** pointer file at its root; source tarballs are *not* committed.
+These workflows resolve all listed sources and turn them into built (and, on
+release, published) RPMs.
 
 ## Components
 
@@ -34,7 +35,8 @@ This follows the Fedora/CentOS
 SHA512 (mypackage-1.0.tar.gz) = 3a7bd3e2360a3d29...
 ```
 
-`resolve-sources.sh` processes each entry:
+`resolve-sources.sh` processes each entry and the build workflow passes the
+resolved tarball list to `build-rpm.sh`:
 
 1. **Cache lookup.** Compute the lookaside path
    (default `{filename}/{hashtype}/{hash}/{filename}`)

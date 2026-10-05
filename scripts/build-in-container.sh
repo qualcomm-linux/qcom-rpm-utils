@@ -8,7 +8,7 @@
 # The rpm-builder image already provides the toolchain (rpm-build, compilers,
 # CRB+EPEL). This script does the package-specific work:
 #   1. rpmdev-setuptree
-#   2. stage the tarball + spec into ~/rpmbuild/{SOURCES,SPECS}
+#   2. stage the tarballs + spec into ~/rpmbuild/{SOURCES,SPECS}
 #   3. optionally register an extra dnf repo (EXTRA_REPO_DIR)
 #   4. optionally install local dependency RPMs (EXTRA_RPMS)
 #   5. dnf builddep to resolve the spec's BuildRequires
@@ -16,7 +16,7 @@
 #   7. copy the results to /workspace/output
 #
 # Inputs are passed as environment variables (set by build-rpm.sh):
-#   TARBALL      basename of the source tarball under /workspace
+#   TARBALLS     space-separated source tarball basenames under /workspace
 #   SPEC_FILE    basename of the spec file under /workspace
 #   RPM_MACROS   extra `rpmbuild --define` string (optional)
 #   EXTRA_RPMS   space-separated local RPM paths under /workspace (optional)
@@ -24,12 +24,13 @@
 #   HOST_UID/HOST_GID  uid:gid to chown ./output to on exit, so the caller can
 #                   clean up its bind-mounted workspace (optional)
 #
-# /workspace is the bind-mounted host directory: it holds the tarball + spec on
+# /workspace is the bind-mounted host directory: it holds the tarballs + spec on
 # entry and receives ./output on exit.
 # =============================================================================
 set -euo pipefail
 
-: "${TARBALL:?TARBALL is required}"
+: "${TARBALLS:=${TARBALL:-}}"
+: "${TARBALLS:?TARBALLS is required}"
 : "${SPEC_FILE:?SPEC_FILE is required}"
 RPM_MACROS="${RPM_MACROS:-}"
 EXTRA_RPMS="${EXTRA_RPMS:-}"
@@ -38,9 +39,11 @@ EXTRA_REPO_DIR="${EXTRA_REPO_DIR:-}"
 WORKSPACE="/workspace"
 cd "${WORKSPACE}"
 
-if [[ ! -f "${TARBALL}" ]]; then
-    echo "ERROR: tarball not found in workspace: ${TARBALL}" >&2; exit 1
-fi
+for tarball in ${TARBALLS}; do
+    if [[ ! -f "${tarball}" ]]; then
+        echo "ERROR: tarball not found in workspace: ${tarball}" >&2; exit 1
+    fi
+done
 if [[ ! -f "${SPEC_FILE}" ]]; then
     echo "ERROR: spec not found in workspace: ${SPEC_FILE}" >&2; exit 1
 fi

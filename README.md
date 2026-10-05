@@ -2,7 +2,7 @@
 
 Shared tooling and **reusable GitHub Actions workflows** for building and releasing RPM packages, targeting Qualcomm® Linux platforms.
 
-This repository is the central home for the build scripts, container image, composite action, and `workflow_call` workflows used by RPM packaging repositories (`pkg-rpm-*`). A packaging repo holds only a single `*.spec` file and a dist-git `sources` pointer; the workflows here turn that into built — and, on release, published — RPMs.
+This repository is the central home for the build scripts, container image, composite action, and `workflow_call` workflows used by RPM packaging repositories (`pkg-rpm-*`). A packaging repo holds only a single `*.spec` file and a dist-git `sources` pointer; the workflows here resolve all listed source tarballs and turn them into built — and, on release, published — RPMs.
 
 ---
 
@@ -46,7 +46,7 @@ Build the RPM(s):
 
 ```bash
 ./scripts/build-rpm.sh \
-  --tarball ./sources-cache/mypackage-1.0.tar.gz \
+  --tarball ./sources-cache/mypackage-1.0.tar.gz ./sources-cache/vendor-assets-1.0.tar.gz \
   --spec mypackage.spec \
   --output ./output          # builds for the runner's host architecture
 ```

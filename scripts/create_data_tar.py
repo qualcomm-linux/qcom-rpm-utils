@@ -8,6 +8,7 @@ Standalone utility to:
 - Locate a .src.rpm via --path-to-rpms (file path or directory; if directory,
   the newest *.src.rpm is selected; default "." i.e. the current working
   directory)
+- Or, with --no-src-rpm, use only the binary *.rpm files in the directory
 - Find the sibling binary *.rpm files in the same directory that share the
   .src.rpm's version-release (its subpackages)
 - Extract each binary rpm's raw payload into a shared staging directory
@@ -47,14 +48,20 @@ ARTIFACTORY_SEARCH_API = "https://qartifactory-edge.qualcomm.com/artifactory/api
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Generate a tarball of raw rpm contents from a .src.rpm's build."
+        description="Generate a tarball from the raw contents of a set of binary RPMs."
     )
     parser.add_argument(
         "--path-to-rpms",
         required=False,
         default=".",
-        help="Path to the .src.rpm file or a directory containing it (default: current directory, i.e. PWD). "
-             "If a directory is provided, the newest *.src.rpm will be used."
+        help="Path to the .src.rpm file or a directory containing RPMs (default: current directory, i.e. PWD). "
+             "If a directory is provided, the newest *.src.rpm will be used unless --no-src-rpm is set."
+    )
+    parser.add_argument(
+        "--no-src-rpm", "--nosrcrpm",
+        dest="no_src_rpm",
+        action="store_true",
+        help="Do not require a .src.rpm. Use binary *.rpm files from --path-to-rpms and derive source package metadata from them."
     )
     parser.add_argument(
         "--output-tar",
@@ -85,14 +92,14 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def rerun_in_docker(args, srpm_path: str) -> int:
+def rerun_in_docker(args, work_dir: str, rpm_input_path: str) -> int:
     """
     Re-invoke this script inside a Docker container so it runs as root.
     This ensures write access to the output directory regardless of ownership.
 
     Mounts:
       <script_dir>      -> /scripts          (read-only: this script)
-      <work_dir>        -> <work_dir>        (read-write: .src.rpm and .rpm files)
+      <work_dir>        -> <work_dir>        (read-write: RPM files)
       <base_output_dir> -> <base_output_dir> (read-write: tarball destination)
       <invocation_cwd>  -> <invocation_cwd>  (read-write: PWD, the reference directory)
 
@@ -105,7 +112,6 @@ def rerun_in_docker(args, srpm_path: str) -> int:
     image_name = args.docker_image if args.docker_image else DEFAULT_BUILDER_IMAGE
 
     script_dir      = os.path.dirname(os.path.abspath(__file__))
-    work_dir        = os.path.dirname(srpm_path)
     base_output_dir = os.path.abspath(args.output_tar) if args.output_tar else work_dir
     invocation_cwd  = os.path.abspath(os.getcwd())
 
@@ -123,7 +129,9 @@ def rerun_in_docker(args, srpm_path: str) -> int:
         docker_cmd += ['-v', f'{d}:{d}:Z']
 
     docker_cmd += [image_name, 'python3', '/scripts/create_data_tar.py',
-                   '--path-to-rpms', srpm_path]
+                   '--path-to-rpms', rpm_input_path]
+    if args.no_src_rpm:
+        docker_cmd += ['--no-src-rpm']
     if args.arch:
         docker_cmd += ['--arch', args.arch]
     if args.output_tar:
@@ -178,6 +186,24 @@ def find_srpm_file(path_to_rpms: str) -> str:
     raise FileNotFoundError(f"Invalid --path-to-rpms: {path_to_rpms}. Provide a .src.rpm file or a directory containing one.")
 
 
+def find_binary_rpm_directory(path_to_rpms: str) -> str:
+    """
+    Return the directory containing binary RPMs for --no-src-rpm mode.
+    """
+    path_to_rpms = os.path.abspath(path_to_rpms or '.')
+    if not os.path.isdir(path_to_rpms):
+        raise FileNotFoundError(
+            f"Invalid --path-to-rpms for --no-src-rpm: {path_to_rpms}. "
+            "Provide a directory containing binary .rpm files."
+        )
+    if not any(
+        not path.endswith('.src.rpm')
+        for path in glob.glob(os.path.join(path_to_rpms, '*.rpm'))
+    ):
+        raise FileNotFoundError(f"No binary .rpm files found in directory: {path_to_rpms}")
+    return path_to_rpms
+
+
 def rpm_query(rpm_path: str, queryformat: str) -> str:
     """
     Run `rpm -qp --qf <queryformat>` against an rpm/srpm and return the
@@ -217,6 +243,50 @@ def collect_binary_rpms_for_srpm(srpm_path: str, work_dir: str):
     if not matches:
         raise RuntimeError(f"No binary .rpm files in {work_dir} match version-release '{target_vr}' from {srpm_path}")
     return matches
+
+
+def collect_binary_rpms_without_srpm(work_dir: str):
+    """
+    Collect binary RPMs from one source build without requiring the .src.rpm.
+    The SOURCERPM tag supplies the source package identity and prevents RPMs
+    from unrelated builds from being merged into one tarball.
+    """
+    rpm_paths = sorted(
+        path for path in glob.glob(os.path.join(work_dir, '*.rpm'))
+        if not path.endswith('.src.rpm')
+    )
+    if not rpm_paths:
+        raise RuntimeError(f"No binary .rpm files found in {work_dir}")
+
+    source_rpms = {}
+    for rpm_path in rpm_paths:
+        source_rpm = rpm_query(rpm_path, '%{SOURCERPM}')
+        if not source_rpm or source_rpm == '(none)':
+            raise RuntimeError(f"Binary RPM has no SOURCERPM metadata: {rpm_path}")
+        source_rpms.setdefault(source_rpm, []).append(rpm_path)
+
+    if len(source_rpms) != 1:
+        builds = ', '.join(sorted(source_rpms))
+        raise RuntimeError(
+            "Binary RPM directory contains multiple source builds; "
+            f"use a directory containing one build only: {builds}"
+        )
+
+    source_rpm = next(iter(source_rpms))
+    first_rpm = rpm_paths[0]
+    version = rpm_query(first_rpm, '%{VERSION}')
+    release = rpm_query(first_rpm, '%{RELEASE}')
+    suffix = f"-{version}-{release}.src.rpm"
+    if not source_rpm.endswith(suffix):
+        raise RuntimeError(
+            f"Cannot derive source package name from SOURCERPM metadata: {source_rpm}"
+        )
+
+    name = source_rpm[:-len(suffix)]
+    if not name:
+        raise RuntimeError(f"Invalid SOURCERPM metadata: {source_rpm}")
+
+    return rpm_paths, name, version, release
 
 
 def extract_rpms_to_stage(rpm_paths, stage_dir) -> None:
@@ -361,7 +431,14 @@ def main():
     args = parse_arguments()
 
     try:
-        srpm_path = find_srpm_file(args.path_to_rpms)
+        if args.no_src_rpm:
+            work_dir = find_binary_rpm_directory(args.path_to_rpms)
+            rpm_input_path = work_dir
+            srpm_path = None
+        else:
+            srpm_path = find_srpm_file(args.path_to_rpms)
+            work_dir = os.path.dirname(srpm_path)
+            rpm_input_path = srpm_path
     except Exception as e:
         logger.critical(str(e))
         sys.exit(1)
@@ -372,7 +449,7 @@ def main():
         if shutil.which('docker') is None:
             logger.critical("Missing required tool: docker. Install Docker to run this script.")
             sys.exit(1)
-        rc = rerun_in_docker(args, srpm_path)
+        rc = rerun_in_docker(args, work_dir, rpm_input_path)
         sys.exit(rc)
 
     try:
@@ -381,19 +458,16 @@ def main():
         logger.critical(str(e))
         sys.exit(1)
 
-    work_dir = os.path.dirname(srpm_path)
     stage_dir = os.path.join(work_dir, '.rpm_stage')
 
     try:
-        name = rpm_query(srpm_path, '%{NAME}')
-        version = rpm_query(srpm_path, '%{VERSION}')
-        release = rpm_query(srpm_path, '%{RELEASE}')
-    except RuntimeError as e:
-        logger.critical(str(e))
-        sys.exit(1)
-
-    try:
-        rpm_paths = collect_binary_rpms_for_srpm(srpm_path, work_dir)
+        if args.no_src_rpm:
+            rpm_paths, name, version, release = collect_binary_rpms_without_srpm(work_dir)
+        else:
+            name = rpm_query(srpm_path, '%{NAME}')
+            version = rpm_query(srpm_path, '%{VERSION}')
+            release = rpm_query(srpm_path, '%{RELEASE}')
+            rpm_paths = collect_binary_rpms_for_srpm(srpm_path, work_dir)
     except Exception as e:
         logger.critical(str(e))
         sys.exit(1)

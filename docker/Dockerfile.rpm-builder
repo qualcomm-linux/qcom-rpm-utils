@@ -76,7 +76,7 @@ RUN dnf -y install --allowerasing \
 # Qualcomm public RPM repo. RPMs are unsigned (gpgcheck=0), but repomd.xml is
 # signed, so repo_gpgcheck=1 verifies the metadata
 COPY keyrings/qsc-rpm-releases.asc /etc/pki/rpm-gpg/RPM-GPG-KEY-qsc-rpm-releases
-ARG QCOM_RPM_BASE_URL=https://softwarecenter.qualcomm.com/nexus/rpm/centos/10/os
+ARG QCOM_RPM_BASE_URL=https://softwarecenter.qualcomm.com/nexus/rpm/centos10/os
 RUN cat > /etc/yum.repos.d/qcom-rpm-releases.repo <<EOF
 [qcom-rpm-releases]
 name=Qualcomm RPM Releases

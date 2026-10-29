@@ -168,7 +168,7 @@ jobs:
           fi
 
           artifactory_base="${SERVER_URL%/}/artifactory"
-          tree="${DISTRO}/${DISTRO_VERSION}/${CHANNEL}"
+          tree="${DISTRO}${DISTRO_VERSION}/${CHANNEL}"
           {
             echo "target_repo=${target_repo}"
             echo "cache_repo=${cache_repo}"

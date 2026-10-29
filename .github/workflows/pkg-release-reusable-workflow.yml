@@ -251,7 +251,7 @@ jobs:
           CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
-          base="${TARGET_REPO}/${DISTRO}/${DISTRO_VERSION}/${CHANNEL}"
+          base="${TARGET_REPO}/${DISTRO}${DISTRO_VERSION}/${CHANNEL}"
           {
             echo "## Published RPMs"
             echo ""

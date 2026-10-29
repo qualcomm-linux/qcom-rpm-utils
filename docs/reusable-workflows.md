@@ -120,14 +120,14 @@ to `<target-repo>/sources/`.
 RPMs are published into a standard YUM tree, split by architecture:
 
 ```
-<target-repo>/<distro>/<distro-version>/<channel>/
+<target-repo>/<distro><distro-version>/<channel>/
 ├── aarch64/Packages/     <- binary RPMs
 ├── noarch/Packages/
 ├── x86_64/Packages/
 └── SRPMS/Packages/       <- source RPMs (*.src.rpm)
 ```
 
-With the defaults that is `<repo>/centos/10/os/<arch>/Packages/`. Architecture is
+With the defaults that is `<repo>/centos10/os/<arch>/Packages/`. Architecture is
 read from each filename, and `*.src.rpm` is routed to `SRPMS/` rather than an
 `src/` directory.
 
@@ -206,4 +206,4 @@ overwrite guard has to be able to query what is already published.
 | `pkg-release-approval` | Environment | Approval gate for **prod** publishes only. Add required reviewers, or the gate is a no-op. Staging needs no environment. |
 
 
-Each target repo also needs `yumRootDepth: 4` on the Artifactory side.
+Each target repo also needs `yumRootDepth: 3` on the Artifactory side.

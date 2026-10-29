@@ -268,7 +268,7 @@ runs:
           exit 1
         fi
 
-        BASE_DIR="${TARGET_REPO}/${DISTRO}/${DISTRO_VERSION}/${CHANNEL}"
+        BASE_DIR="${TARGET_REPO}/${DISTRO}${DISTRO_VERSION}/${CHANNEL}"
         echo "Upload base: $BASE_DIR"
 
         for f in "${rpms[@]}"; do
